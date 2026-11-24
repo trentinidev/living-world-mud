@@ -3,9 +3,9 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 
-from living_world.model import COIN, FARM_OWNER, Config, MarketIntent, WorldError
+from living_world.model import COIN, FARM_OWNER, GRAIN, Config, MarketIntent, WorldError
 from living_world.persistence import Save
-from living_world.routes import FIELDS
+from living_world.routes import FIELDS, MARKET_SQUARE, WEST_FARM, stall
 
 
 class HamletTests(unittest.TestCase):
@@ -67,6 +67,31 @@ class HamletTests(unittest.TestCase):
         self.assertTrue(shifts)
         self.assertFalse(any(event["kind"] == "cut_wood_completed" for event in journal))
         self.assertGreater(save.summary()["village"]["coin_paid_in_wages"], 0)
+
+    def test_last_grain_at_a_stall_goes_to_exactly_one_of_two_buyers(self):
+        save = self.create("last-grain")
+
+        def stage(sim):
+            sim.world.queue.clear()
+            sim.world.inventory[stall(FARM_OWNER)][GRAIN] = 1
+            sim.world.inventory[stall(WEST_FARM)][GRAIN] = 0
+            for hand in ("farmhand-1", "farmhand-2"):
+                sim.world.actors[hand] = replace(sim.world.actors[hand], location=MARKET_SQUARE)
+
+        save.mutate(stage)
+        price = save.summary()["village"]["market"]["offers"][0]["price"]
+        first = MarketIntent("buy_food", "farmhand-1", Config().village.purchase_minutes, FARM_OWNER, price)
+        save.submit("first", first)
+        before = save.inspect(journal=True)
+        with self.assertRaisesRegex(WorldError, "no grain offered"):
+            save.submit("second", replace(first, actor="farmhand-2"))
+        self.assertEqual(save.inspect(journal=True), before)
+        save.advance(minutes=Config().village.purchase_minutes)
+        summary = save.summary()
+        self.assertEqual(summary["village"]["purchases"], 1)
+        self.assertEqual(summary["inventory"]["farmhand-1"][GRAIN], 1)
+        self.assertEqual(summary["inventory"]["farmhand-2"][GRAIN], 0)
+        self.assertEqual(summary["village"]["coin_supply"], 222)
 
     def test_saved_continuation_matches_direct_run_and_conserves_coins(self):
         direct = self.create("direct")
