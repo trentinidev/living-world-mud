@@ -6,7 +6,7 @@ Read [Progress](docs/PROGRESS.md), [Roadmap](docs/ROADMAP.md), and the relevant 
 
 - Install the package with `python -m pip install -e .`. Install the optional test dependency with `python -m pip install -e ".[test]"`.
 - Run `python -m pytest -q`. For an offline run from source, set `PYTHONPATH=src` and run `python -m unittest discover -s tests -v`.
-- Run `python -m living_world scenario lab --seed 42 --json` and `python -m living_world scenario mining --seed 8 --days 1 --json` for smoke checks. The market scenarios also accept `--shock seed-shortage` or `--shock worker-loss` for paired cases.
+- Run `python -m living_world scenario lab --seed 42 --json` and `python -m living_world scenario tools --seed 8 --days 7 --json` for smoke checks. The market scenarios also accept `--shock seed-shortage` or `--shock worker-loss` for paired cases.
 
 ## Simulation conventions
 
@@ -18,6 +18,10 @@ Read [Progress](docs/PROGRESS.md), [Roadmap](docs/ROADMAP.md), and the relevant 
 - In the firewood scenario, record standing-wood loss and firewood production together. A hearth consumes purchased fuel and updates the persisted expiry of its warmth.
 - The charcoal burner uses the same funded firewood purchase as households. A kiln batch reserves its inputs and records consumption and output together on completion.
 - Mining moves ore out of the finite deposit and into mine stock on shift completion. Deliveries reserve mine stock and move the reserved cargo to the miner's stall on arrival.
+- Ore and charcoal purchases debit the buyer and credit the supplier. A smelting batch reserves both inputs and credits iron only on completion.
+- In the blacksmith scenario the smelter delivers iron to a stall, an iron purchase pays the smelter, and a forging job consumes reserved iron on completion.
+- A farm holds at most one installed hoe. The active harvest reserves it, completion applies the bonus and one use of wear, and the last use removes the hoe from inventory.
+- In `seed-saving`, harvest completion spends the planted seed and divides the crop between edible grain and planting seed in the same transaction. Keep these outputs separate in the journal and summary. Set `seed_reserve_target` to zero in a matched control.
 - Keep world rules independent of wall-clock time, disk, user interfaces, and networking. Use explicit ordering and stable seeds. Verify interrupted continuation as well as repeat-run determinism.
 - Keep saves out of source control. Change rules, content, or schema versions deliberately when changing save or replay semantics.
 - Implement the smallest useful slice and run the existing tests before advancing a phase. Preserve real adverse outcomes, such as running out of seed, and record observed results and limitations.

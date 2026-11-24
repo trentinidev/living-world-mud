@@ -7,11 +7,12 @@ from dataclasses import dataclass
 from random import Random
 from typing import Literal
 
-from . import forestry, kiln, mining, routes, village
+from . import blacksmith, farm_tools, forestry, kiln, mining, routes, seed_trade, smelting, village
 from .model import (
-    COIN, FARM_OWNER, FARMSTEAD, FORESTRY_CONTENT_VERSIONS, GRAIN, MARKET_CONTENT_VERSION,
-    MARKET_CONTENT_VERSIONS, SEED_GRAIN, SPATIAL_CONTENT_VERSIONS, Actor, CharcoalIntent, Config,
-    FirewoodIntent, MarketIntent, MiningIntent, Travel, VillageIntent, World, WorldError,
+    BLACKSMITH_CONTENT_VERSIONS, COIN, FARM_OWNER, FARMSTEAD, FORESTRY_CONTENT_VERSIONS, GRAIN,
+    MARKET_CONTENT_VERSION, MARKET_CONTENT_VERSIONS, SEED_GRAIN, SEED_TRADE_CONTENT_VERSION, SMELTING_CONTENT_VERSIONS,
+    SPATIAL_CONTENT_VERSIONS, TOOLS_CONTENT_VERSIONS, Actor, Config, Intent, MarketIntent,
+    VillageIntent, World, WorldError,
 )
 from .routes import FARMS, WEST_FARM
 
@@ -121,7 +122,8 @@ def choices(
 
 def route_choices(
     world: World, actor_id: str, available: Available, shift_open: Callable[[str], bool],
-) -> Iterator[VillageIntent | MarketIntent | Travel | FirewoodIntent | CharcoalIntent | MiningIntent]:
+    hoe_is_free: Callable[[str], bool],
+) -> Iterator[Intent]:
     actor = world.actors[actor_id]
     settings = world.config.village
     site = actor.location
@@ -150,6 +152,15 @@ def route_choices(
                 yield forestry.to_market(world, available)
             elif actor_id == routes.MINER and site == routes.MINE:
                 yield mining.to_market(world, available)
+            elif (world.content_version in SMELTING_CONTENT_VERSIONS
+                  and actor_id == routes.CHARCOAL_BURNER and site == routes.KILN):
+                yield kiln.to_market(world, available)
+            elif (world.content_version in BLACKSMITH_CONTENT_VERSIONS
+                  and actor_id == routes.SMELTER and site == routes.SMELTERY):
+                yield smelting.to_market(world, available)
+            elif (world.content_version in TOOLS_CONTENT_VERSIONS
+                  and actor_id == routes.BLACKSMITH and site == routes.FORGE):
+                yield blacksmith.to_market(world, available)
             else:
                 yield routes.next_leg(world, actor_id, site, routes.MARKET_SQUARE)
 
@@ -158,10 +169,18 @@ def route_choices(
     if actor.fatigue >= settings.fatigue_limit:
         yield VillageIntent("rest", actor_id, settings.rest_minutes)
         return
+    if world.content_version == SEED_TRADE_CONTENT_VERSION and home:
+        yield from seed_trade.procurement(world, actor_id, available)
+    if world.content_version in TOOLS_CONTENT_VERSIONS and home:
+        yield from farm_tools.procurement(world, actor_id, available, delivery_grain)
     if actor_id == routes.CHARCOAL_BURNER:
         yield from kiln.work(world, available)
     elif actor_id == routes.MINER:
         yield from mining.work(world, available)
+    elif actor_id == routes.SMELTER:
+        yield from smelting.work(world, available)
+    elif actor_id == routes.BLACKSMITH:
+        yield from blacksmith.work(world, available)
     if actor_id == routes.WOODCUTTER:
         yield from forestry.work(world, available)
     elif home:
@@ -173,7 +192,7 @@ def route_choices(
         elif delivery_grain > 0:
             yield routes.next_leg(world, actor_id, site, routes.MARKET_SQUARE, grain=delivery_grain)
         elif pantry_stock < settings.pantry_target:
-            yield MarketIntent("harvest", actor_id, settings.harvest_minutes, actor_id)
+            yield farm_tools.harvest(world, actor_id, settings.harvest_minutes, actor_id, hoe_is_free)
     elif actor.can_work and coin < settings.meal_price * 4:
         for farm in sorted(FARMS, key=lambda owner: (routes.distance(world, site, routes.FIELDS[owner]), owner)):
             pantry = routes.pantry(farm)
@@ -183,6 +202,6 @@ def route_choices(
                 continue
             if coin < settings.meal_price * 3 or available(pantry, GRAIN) < settings.pantry_target:
                 if site == field:
-                    yield MarketIntent("harvest", actor_id, settings.harvest_minutes, farm)
+                    yield farm_tools.harvest(world, actor_id, settings.harvest_minutes, farm, hoe_is_free)
                 else:
                     yield routes.next_leg(world, actor_id, site, field)

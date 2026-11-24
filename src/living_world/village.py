@@ -9,9 +9,9 @@ from random import Random
 from . import routes
 from .model import (
     COIN, FARM_OWNER, FARMSTEAD, FORESTRY_CONTENT_VERSIONS, GRAIN, MARKET_CONTENT_VERSIONS, MAX_CLOCK,
-    SEED_GRAIN, SPATIAL_CONTENT_VERSIONS, VILLAGE_CONTENT_VERSION, VILLAGE_CONTENT_VERSIONS, Actor,
-    CharcoalIntent, Config, FirewoodIntent, MarketIntent, MiningIntent, Movement, VillageActivity,
-    VillageConfig, VillageIntent, World, WorldError,
+    SEED_GRAIN, SEED_SAVING_CONTENT_VERSIONS, SPATIAL_CONTENT_VERSIONS, VILLAGE_CONTENT_VERSION,
+    VILLAGE_CONTENT_VERSIONS, Actor, CharcoalIntent, Config, FirewoodIntent, ForgeIntent, MarketIntent, MiningIntent, Movement,
+    SmeltingIntent, ToolIntent, VillageActivity, VillageConfig, VillageIntent, World, WorldError,
 )
 
 FARMHAND_NAMES = ("Bren", "Oda", "Tavin", "Neri", "Merrit", "Sela", "Iven", "Linna")
@@ -89,7 +89,14 @@ def activity_movements(
         if actor != farm:
             movements += (Movement(farm, actor, COIN, world.config.village.wage),)
         if harvested:
-            movements += (Movement(None, pantry, GRAIN, harvested),)
+            saved_as_seed = 0
+            if world.content_version in SEED_SAVING_CONTENT_VERSIONS:
+                seed_after_planting = world.inventory[pantry][SEED_GRAIN] - 1
+                reserve_gap = max(0, world.config.village.seed_reserve_target - seed_after_planting)
+                saved_as_seed = min(reserve_gap, harvested // 2)
+            movements += (Movement(None, pantry, GRAIN, harvested - saved_as_seed),)
+            if saved_as_seed:
+                movements += (Movement(None, pantry, SEED_GRAIN, saved_as_seed),)
         return movements
     return ()
 
@@ -99,7 +106,11 @@ def hunger_at(actor: Actor, minute: int, settings: VillageConfig) -> int:
 
 
 def update_needs(
-    world: World, intent: VillageIntent | MarketIntent | FirewoodIntent | CharcoalIntent | MiningIntent,
+    world: World,
+    intent: (
+        VillageIntent | MarketIntent | FirewoodIntent | CharcoalIntent | MiningIntent
+        | SmeltingIntent | ForgeIntent | ToolIntent
+    ),
 ) -> dict[str, int | bool]:
     actor = world.actors[intent.actor]
     settings = world.config.village
@@ -109,7 +120,7 @@ def update_needs(
     details: dict[str, int | bool] = {}
     if intent.kind == "eat":
         hunger = max(0, hunger - settings.meal_relief)
-    if intent.kind in ("harvest", "cut_wood", "make_charcoal", "mine_ore"):
+    if intent.kind in ("harvest", "cut_wood", "make_charcoal", "mine_ore", "smelt_iron", "forge_hoe"):
         fatigue = min(settings.fatigue_limit, fatigue + settings.work_fatigue)
     if intent.kind == "rest":
         home = routes.FIELDS.get(intent.actor)

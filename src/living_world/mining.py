@@ -6,7 +6,8 @@ from collections.abc import Iterator
 
 from . import forestry, routes
 from .model import (
-    COIN, GRAIN, IRON_ORE, MINING_CONTENT_VERSION, ORE_IN_VEIN, Actor, MiningIntent, Movement,
+    COIN, GRAIN, IRON_ORE, MINING_CONTENT_VERSION, MINING_CONTENT_VERSIONS, ORE_IN_VEIN,
+    Actor, MiningIntent, Movement,
     OreDelivery, Travel, World, WorldError, integer,
 )
 from .routes import MARKET_SQUARE, MINE, MINE_STOCK, MINER
@@ -28,8 +29,8 @@ def add_mine(world: World) -> None:
 
 
 def validate(world: World, intent: MiningIntent) -> None:
-    if world.content_version != MINING_CONTENT_VERSION:
-        raise WorldError("ore extraction requires a mining save")
+    if world.content_version not in MINING_CONTENT_VERSIONS:
+        raise WorldError("ore extraction requires a save with a mine")
     actor = world.actors[intent.actor]
     if intent.actor != MINER or actor.location != MINE or not actor.can_work:
         raise WorldError("only the miner can extract ore at the mine")

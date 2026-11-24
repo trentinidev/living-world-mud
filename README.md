@@ -1,6 +1,6 @@
 # Living World
 
-Living World is a local, text-based fantasy MUD under development. The prototype runs a deterministic simulation from the command line. In the `mining` scenario, a miner works a finite deposit and delivers iron ore to the village market.
+Living World is a local, text-based fantasy MUD under development. The prototype runs a deterministic simulation from the command line. In the `seed-saving` scenario, farmers buy and replace iron hoes and set aside part of the harvest for the next planting.
 
 ## Run locally
 
@@ -13,6 +13,75 @@ python -m venv .venv
 ```
 
 On macOS and Linux, use `.venv/bin/python`. To run directly from the source tree without installing packages, set `PYTHONPATH=src` in your shell (`$env:PYTHONPATH = "src"` in PowerShell), then use `python -m living_world`.
+
+## Compare a week with and without saving seed
+
+1. In PowerShell, from the project folder, create two configuration files. Both give each farm one seed to start. The first sets a target of four seeds per farm. The second sets the target to zero and disables seed saving.
+
+   ```powershell
+   New-Item -ItemType Directory -Path saves -Force | Out-Null
+   '{"village":{"starting_seed":1,"seed_reserve_target":4}}' | Set-Content saves/low-seed-saving.json
+   '{"village":{"starting_seed":1,"seed_reserve_target":0}}' | Set-Content saves/low-seed-control.json
+   ```
+
+2. Run both versions of the same seven-day simulation.
+
+   ```powershell
+   .\.venv\Scripts\living-world.exe scenario seed-saving --seed 8 --days 7 --config saves/low-seed-saving.json --json
+   .\.venv\Scripts\living-world.exe scenario seed-saving --seed 8 --days 7 --config saves/low-seed-control.json --json
+   ```
+
+3. Compare `village.seed_saving.seed_by_farm` and `village.grain_eaten`. With seed saving, each farm ends with four seeds and residents eat 180 grain. With seed saving disabled, both farms run out of seed after two harvests and residents eat 15 grain.
+
+## Watch a farm buy seed after a shortage
+
+1. From the project folder, run the first command alongside the second for a comparison. Both remove the east farm's unreserved seed at the end of day one.
+
+   ```powershell
+   .\.venv\Scripts\living-world.exe scenario seed-trade --seed 8 --days 7 --shock seed-shortage --json
+   .\.venv\Scripts\living-world.exe scenario seed-saving --seed 8 --days 7 --shock seed-shortage --json
+   ```
+
+2. In the first result, `village.seed_trade` shows one seed bought and unloaded for two coins. Under `village.seed_saving.seed_by_farm`, the east farm ends with four seeds. Its reserve reaches zero in the second run.
+
+## Watch farming tools pay off and wear out
+
+From the project folder in PowerShell, run these commands one at a time.
+
+```powershell
+(.\.venv\Scripts\living-world.exe scenario tools --seed 8 --days 1 --json | ConvertFrom-Json).village.tools
+(.\.venv\Scripts\living-world.exe scenario tools --seed 8 --days 7 --json | ConvertFrom-Json).village.tools
+```
+
+On day one, the first farm paid **15 coins** for a hoe, installed it, and grew **2 extra grain** on the first assisted harvest. By day seven, `assisted_harvests` is **29**, `bonus_grain` is **58**, and `replacement_hoes_installed` is **3**. Each hoe lasts eight assisted harvests.
+
+Use `create --scenario tools` to keep a world and `inspect --journal` to see purchases, installation, assisted harvests, and wear.
+
+## Watch the first iron hoe finish
+
+From the project folder in PowerShell, run these commands one at a time.
+
+```powershell
+(.\.venv\Scripts\living-world.exe scenario blacksmith --seed 8 --minutes 1039 --json | ConvertFrom-Json).village.blacksmith
+(.\.venv\Scripts\living-world.exe scenario blacksmith --seed 8 --minutes 1040 --json | ConvertFrom-Json).village.blacksmith
+```
+
+At minute 1039, the blacksmith has paid the smelter **12 coins** and the first hoe is in progress. At minute 1040, `iron_consumed` and `hoes_in_stock` both show **1**.
+
+Use `create --scenario blacksmith` to keep the world and `inspect --journal` to see deliveries, payments, and forging as separate transactions. With a JSON config that sets `starting_ore_deposit` to zero, the forge waits for iron.
+
+## Watch the first iron batch finish
+
+From the project folder in PowerShell, run these commands one at a time.
+
+```powershell
+(.\.venv\Scripts\living-world.exe scenario smelting --seed 8 --minutes 753 --json | ConvertFrom-Json).village.smelting
+(.\.venv\Scripts\living-world.exe scenario smelting --seed 8 --minutes 754 --json | ConvertFrom-Json).village.smelting
+```
+
+At minute 753, the smelter has paid the miner **4 coins** and the charcoal burner **5 coins**. The first batch is in progress and `iron_in_stock` is **0**. At minute 754, the report shows **2 ore consumed**, **1 charcoal consumed**, and **1 iron in stock**.
+
+Use `create --scenario smelting` to keep a world and `inspect --journal` to see the payments and production transactions. For a shortage run, pass a JSON config with `starting_ore_deposit` or `starting_standing_wood` set to zero.
 
 ## Watch iron ore reach the market
 

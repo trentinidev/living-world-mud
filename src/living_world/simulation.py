@@ -7,12 +7,13 @@ from dataclasses import asdict, replace
 from heapq import heapify, heappop, heappush
 from random import Random
 
-from . import forestry, kiln, market, mining, routes, village
+from . import blacksmith, farm_tools, forestry, kiln, market, mining, routes, seed_trade, smelting, village
 from .model import (
     COIN, FARM_OWNER, GRAIN, MARKET_CONTENT_VERSION, MARKET_CONTENT_VERSIONS, MAX_CLOCK, MAX_QUANTITY,
-    SEED_GRAIN, SPATIAL_CONTENT_VERSIONS, VILLAGE_CONTENT_VERSIONS, Action, Actor, CharcoalIntent,
-    Config, Event, FirewoodIntent, Intent, MarketIntent, MiningIntent, Movement, Scheduled, Transfer,
-    Travel, VillageIntent,
+    SEED_GRAIN, SEED_SAVING_CONTENT_VERSION, SEED_TRADE_CONTENT_VERSION, SPATIAL_CONTENT_VERSIONS, VILLAGE_CONTENT_VERSIONS,
+    Action, Actor, CharcoalIntent,
+    Config, Event, FirewoodIntent, ForgeIntent, HoeHarvest, Intent, MarketIntent, MiningIntent,
+    Movement, Scheduled, SeedIntent, SmeltingIntent, ToolIntent, Transfer, Travel, VillageIntent,
     World, WorldError, integer,
 )
 
@@ -35,6 +36,9 @@ class Simulation:
     def create(cls, seed: int, config: Config, scenario: str = "lab") -> Simulation:
         integer("seed", seed, -MAX_CLOCK - 1, MAX_CLOCK)
         rng = Random(f"living-world:generation:{seed}")
+        with_seed_trade = scenario == "seed-trade"
+        if with_seed_trade:
+            scenario = "seed-saving"
         if scenario == "lab":
             grain = rng.randint(config.starting_grain_min, config.starting_grain_max)
             world = World(
@@ -50,16 +54,27 @@ class Simulation:
             )
         elif scenario == "village":
             world = village.create_village(seed, config, rng)
-        elif scenario in ("market", "routes", "firewood", "charcoal", "mining"):
+        elif scenario in (
+            "market", "routes", "firewood", "charcoal", "mining", "smelting", "blacksmith", "tools",
+            "seed-saving",
+        ):
             world = market.create_market(seed, config, rng)
             if scenario != "market":
                 routes.separate_sites(world)
-            if scenario in ("firewood", "charcoal", "mining"):
+            if scenario in ("firewood", "charcoal", "mining", "smelting", "blacksmith", "tools", "seed-saving"):
                 forestry.add_woodland(world)
-            if scenario in ("charcoal", "mining"):
+            if scenario in ("charcoal", "mining", "smelting", "blacksmith", "tools", "seed-saving"):
                 kiln.add_kiln(world)
-            if scenario == "mining":
+            if scenario in ("mining", "smelting", "blacksmith", "tools", "seed-saving"):
                 mining.add_mine(world)
+            if scenario in ("smelting", "blacksmith", "tools", "seed-saving"):
+                smelting.add_smeltery(world)
+            if scenario in ("blacksmith", "tools", "seed-saving"):
+                blacksmith.add_forge(world)
+            if scenario in ("tools", "seed-saving"):
+                farm_tools.enable_tools(world)
+            if scenario == "seed-saving":
+                world.content_version = SEED_TRADE_CONTENT_VERSION if with_seed_trade else SEED_SAVING_CONTENT_VERSION
         else:
             raise WorldError(f"unknown scenario {scenario!r}")
         sim = cls(world)
@@ -107,6 +122,14 @@ class Simulation:
             return kiln.movements(intent)
         if isinstance(intent, MiningIntent):
             return mining.movements(intent)
+        if isinstance(intent, SmeltingIntent):
+            return smelting.movements(intent)
+        if isinstance(intent, ForgeIntent):
+            return blacksmith.movements(intent)
+        if isinstance(intent, ToolIntent):
+            return farm_tools.movements(intent)
+        if isinstance(intent, SeedIntent):
+            return seed_trade.movements(intent)
         return village.activity_movements(intent, self.world, harvested=harvested)
 
     def available(self, owner: str, good: str) -> int:
@@ -134,6 +157,10 @@ class Simulation:
             raise WorldError(f"actor {intent.actor!r} is already busy")
         if isinstance(intent, MarketIntent):
             self.validate_market_start(intent)
+        if isinstance(intent, SeedIntent) and intent.kind == "buy_seed":
+            assert intent.seller is not None
+            if not seed_trade.has_surplus(self.world, intent.seller, self.available):
+                raise WorldError(f"no surplus seed offered by {intent.seller}")
         reservations = [move for move in self.movements(intent) if move.source is not None]
         for move in reservations:
             if self.available(move.source, move.good) < move.quantity:
@@ -170,10 +197,24 @@ class Simulation:
         if isinstance(intent, MiningIntent):
             mining.validate(self.world, intent)
             return
+        if isinstance(intent, SmeltingIntent):
+            smelting.validate(self.world, intent)
+            return
+        if isinstance(intent, ForgeIntent):
+            blacksmith.validate(self.world, intent)
+            return
+        if isinstance(intent, ToolIntent):
+            farm_tools.validate(self.world, intent)
+            return
+        if isinstance(intent, SeedIntent):
+            seed_trade.validate(self.world, intent)
+            return
         if isinstance(intent, (VillageIntent, MarketIntent)):
             village.validate_activity(self.world, intent)
             if isinstance(intent, MarketIntent):
                 market.validate_activity(self.world, intent)
+            if isinstance(intent, HoeHarvest):
+                farm_tools.validate_harvest(self.world, intent)
             return
         if not isinstance(intent.target, str):
             raise WorldError("target must be an actor ID")
@@ -193,6 +234,8 @@ class Simulation:
             raise WorldError("both actors must be in the same location")
 
     def validate_market_start(self, intent: MarketIntent) -> None:
+        if isinstance(intent, HoeHarvest) and not self.hoe_is_free(intent.farm):
+            raise WorldError(f"the hoe at {intent.farm} is already reserved")
         if intent.kind == "buy_food":
             offer = next((offer for offer in market.offers(self.world, self.available)
                           if offer.seller == intent.farm), None)
@@ -209,6 +252,10 @@ class Simulation:
             and action.intent.farm == farm and action.intent.actor != farm
             for action in self.active.values()
         )
+
+    def hoe_is_free(self, farm: str) -> bool:
+        return not any(isinstance(action.intent, HoeHarvest) and action.intent.farm == farm
+                       for action in self.active.values())
 
     def cancel(self, key: str, *, cause_id: int | None = None) -> Action:
         action = self.world.actions.get(key)
@@ -254,7 +301,17 @@ class Simulation:
             settings = self.world.config.village
             harvested = self.random.randint(settings.harvest_min, settings.harvest_max)
             self.world.rng_state = self.random.getstate()
+        tool_details: dict[str, object] = {}
+        if isinstance(intent, HoeHarvest):
+            harvested += farm_tools.HOE_BONUS
         movements = self.movements(intent, harvested=harvested)
+        if isinstance(intent, HoeHarvest):
+            movements += farm_tools.wear(self.world, intent.farm)
+            tool_details["hoe_bonus_grain"] = farm_tools.HOE_BONUS
+            tool_details["hoe_uses_remaining"] = self.world.hoe_uses[intent.farm]
+        if isinstance(intent, ToolIntent) and intent.kind == "install_hoe":
+            self.world.hoe_uses[intent.actor] = farm_tools.HOE_LIFETIME
+            tool_details["hoe_uses_remaining"] = farm_tools.HOE_LIFETIME
         self.apply_movements(movements)
         if isinstance(intent, Travel):
             actor = self.world.actors[intent.actor]
@@ -264,18 +321,26 @@ class Simulation:
             "actor": intent.actor,
             "location": self.world.actors[intent.actor].location,
             "movements": [asdict(move) for move in movements],
+            **tool_details,
         }
         kind = "goods_transferred"
         if isinstance(intent, Travel):
             kind = "travel_completed"
             payload.update(origin=intent.source, destination=intent.destination, duration=intent.duration)
-        if isinstance(intent, (VillageIntent, MarketIntent, FirewoodIntent, CharcoalIntent, MiningIntent)):
+        if isinstance(intent, (
+            VillageIntent, MarketIntent, FirewoodIntent, CharcoalIntent, MiningIntent,
+            SmeltingIntent, ForgeIntent, ToolIntent,
+        )):
             kind = f"{intent.kind}_completed"
             payload["needs"] = village.update_needs(self.world, intent)
         if isinstance(intent, MarketIntent):
             payload["farm"] = intent.farm
             if intent.kind == "buy_food":
                 payload["price"] = intent.price
+        if isinstance(intent, SeedIntent):
+            kind = f"{intent.kind}_completed"
+            if intent.seller is not None:
+                payload.update(seller=intent.seller, price=seed_trade.SEED_PRICE)
         action.status = "completed"
         action.outcome_event = self.record(kind, payload, action.start_event)
 
@@ -319,7 +384,9 @@ class Simulation:
         settings = self.world.config.village
         rejected: dict[str, str] = {}
         if self.world.content_version in SPATIAL_CONTENT_VERSIONS:
-            options = market.route_choices(self.world, actor, self.available, self.hired_shift_open)
+            options = market.route_choices(
+                self.world, actor, self.available, self.hired_shift_open, self.hoe_is_free,
+            )
         elif self.world.content_version == MARKET_CONTENT_VERSION:
             options = market.choices(self.world, actor, self.available)
         else:

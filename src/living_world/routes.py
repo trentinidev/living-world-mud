@@ -5,9 +5,11 @@ from __future__ import annotations
 from dataclasses import replace
 
 from .model import (
-    CHARCOAL_CONTENT_VERSION, FARM_OWNER, FIREWOOD, FORESTRY_CONTENT_VERSIONS, GRAIN, IRON_ORE,
-    MAX_QUANTITY, MINING_CONTENT_VERSION, ROUTES_CONTENT_VERSION, SEED_GRAIN, SPATIAL_CONTENT_VERSIONS,
-    FirewoodDelivery, Movement, OreDelivery, Travel, World, WorldError, integer,
+    BLACKSMITH_CONTENT_VERSIONS, CHARCOAL, CHARCOAL_CONTENT_VERSION, FARM_OWNER, FIREWOOD,
+    FORESTRY_CONTENT_VERSIONS, GRAIN, IRON, IRON_HOE, IRON_ORE, MAX_QUANTITY, MINING_CONTENT_VERSIONS,
+    ROUTES_CONTENT_VERSION, SEED_GRAIN, SMELTING_CONTENT_VERSIONS, SPATIAL_CONTENT_VERSIONS,
+    TOOLS_CONTENT_VERSIONS, CharcoalDelivery, FirewoodDelivery, HoeDelivery, IronDelivery, Movement,
+    OreDelivery, Travel, World, WorldError, integer,
 )
 
 WEST_FARM = "west-farm-owner"
@@ -21,11 +23,20 @@ WOODPILE = "woodcutter-woodpile"
 WOODLAND_ROADS = ROADS | {WOODLAND: 35}
 CHARCOAL_BURNER = "charcoal-burner"
 KILN = "kiln"
+KILN_STOCK = "kiln-stock"
 KILN_ROADS = WOODLAND_ROADS | {KILN: 25}
 MINER = "miner"
 MINE = "mine"
 MINE_STOCK = "mine-stock"
 MINE_ROADS = KILN_ROADS | {MINE: 40}
+SMELTER = "smelter"
+SMELTERY = "smeltery"
+IRON_STOCK = "smeltery-stock"
+SMELTERY_ROADS = MINE_ROADS | {SMELTERY: 30}
+BLACKSMITH = "blacksmith"
+FORGE = "forge"
+TOOL_STOCK = "forge-stock"
+FORGE_ROADS = SMELTERY_ROADS | {FORGE: 15}
 
 
 def pantry(farm: str) -> str:
@@ -50,7 +61,11 @@ def separate_sites(world: World) -> None:
 
 
 def roads_for(world: World) -> dict[str, int]:
-    if world.content_version == MINING_CONTENT_VERSION:
+    if world.content_version in BLACKSMITH_CONTENT_VERSIONS:
+        return FORGE_ROADS
+    if world.content_version in SMELTING_CONTENT_VERSIONS:
+        return SMELTERY_ROADS
+    if world.content_version in MINING_CONTENT_VERSIONS:
         return MINE_ROADS
     if world.content_version == CHARCOAL_CONTENT_VERSION:
         return KILN_ROADS
@@ -96,10 +111,25 @@ def validate_travel(world: World, intent: Travel) -> None:
             raise WorldError("firewood deliveries must go from the woodland to the woodcutter's stall")
         integer("delivery firewood", intent.firewood, 1, MAX_QUANTITY)
     elif isinstance(intent, OreDelivery):
-        if (world.content_version != MINING_CONTENT_VERSION or intent.actor != MINER
+        if (world.content_version not in MINING_CONTENT_VERSIONS or intent.actor != MINER
                 or intent.source != MINE or intent.destination != MARKET_SQUARE):
             raise WorldError("ore deliveries must go from the mine to the miner's stall")
         integer("delivery ore", intent.ore, 1, MAX_QUANTITY)
+    elif isinstance(intent, CharcoalDelivery):
+        if (world.content_version not in SMELTING_CONTENT_VERSIONS or intent.actor != CHARCOAL_BURNER
+                or intent.source != KILN or intent.destination != MARKET_SQUARE):
+            raise WorldError("charcoal deliveries must go from the kiln to the charcoal burner's stall")
+        integer("delivery charcoal", intent.charcoal, 1, MAX_QUANTITY)
+    elif isinstance(intent, IronDelivery):
+        if (world.content_version not in BLACKSMITH_CONTENT_VERSIONS or intent.actor != SMELTER
+                or intent.source != SMELTERY or intent.destination != MARKET_SQUARE):
+            raise WorldError("iron deliveries must go from the smeltery to the smelter's stall")
+        integer("delivery iron", intent.iron, 1, MAX_QUANTITY)
+    elif isinstance(intent, HoeDelivery):
+        if (world.content_version not in TOOLS_CONTENT_VERSIONS or intent.actor != BLACKSMITH
+                or intent.source != FORGE or intent.destination != MARKET_SQUARE):
+            raise WorldError("hoe deliveries must go from the forge to the blacksmith's stall")
+        integer("delivery hoes", intent.hoes, 1, MAX_QUANTITY)
 
 
 def movements(intent: Travel) -> tuple[Movement, ...]:
@@ -107,6 +137,12 @@ def movements(intent: Travel) -> tuple[Movement, ...]:
         return (Movement(WOODPILE, stall(WOODCUTTER), FIREWOOD, intent.firewood),)
     if isinstance(intent, OreDelivery):
         return (Movement(MINE_STOCK, stall(MINER), IRON_ORE, intent.ore),)
+    if isinstance(intent, CharcoalDelivery):
+        return (Movement(KILN_STOCK, stall(CHARCOAL_BURNER), CHARCOAL, intent.charcoal),)
+    if isinstance(intent, IronDelivery):
+        return (Movement(IRON_STOCK, stall(SMELTER), IRON, intent.iron),)
+    if isinstance(intent, HoeDelivery):
+        return (Movement(TOOL_STOCK, stall(BLACKSMITH), IRON_HOE, intent.hoes),)
     if intent.grain:
         return (Movement(pantry(intent.actor), stall(intent.actor), GRAIN, intent.grain),)
     return ()

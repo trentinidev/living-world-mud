@@ -1,5 +1,108 @@
 # Progress
 
+## Eleventh checkpoint — paid seed purchases between farms
+
+In the `seed-trade` scenario, a farm owner with an empty seed pantry can travel to a neighboring farm that has unreserved seed above its reserve target. The accepted purchase reserves one seed and two coins. On completion the buyer pays the seller and carries the seed back through the market. A separate action unloads it at home before it can be planted.
+
+In the seven-day seed-8 shortage run, the east farmer paid two coins for a seed and brought it home. The east and west farms completed 37 and 21 harvests respectively and finished with four and 378 seeds. The village paid 56 coins in field wages. In the matched `seed-saving` run, east and west completed eight and 41 harvests, the east reserve remained empty, and the village paid 68 coins in wages. Residents ate 180 grain in each run and the total coin supply stayed at 156.
+
+The 76 existing tests and both seed-trade tests passed. The new tests cover access, reserve protection, insufficient funds, cancellation and retry, and journal equality after resuming a shortage run from a save.
+
+The next slice expands the village population and paid work. The Phase 1 acceptance report still needs the larger village and the complete baseline and disruption runs.
+
+## Tenth checkpoint — save planting seed from harvests
+
+The `seed-saving` scenario extends the farm tool chain. Each completed harvest spends one seed and can set aside up to half its crop, rounded down, to refill the farm's seed reserve. The reserve target defaults to four seed units per farm. The remaining crop goes to the pantry as edible grain. A one-grain crop goes entirely to food. The journal records the two outputs separately.
+
+### Verification
+
+All 76 tests passed in the installed Windows environment. Tests cover the output split, a full reserve, a one-grain harvest, a farm with no seed, two overlapping harvests, hoe bonuses and wear, and resuming a save during a harvest. The earlier `tools` scenario retained its seed-8 digest. Both seven-day commands in the [README walkthrough](../README.md#compare-a-week-with-and-without-saving-seed) were verified with the installed executable.
+
+Both seed-8 villages started with one planting seed per farm. They produced the following results after seven days.
+
+| Measure | Save toward four seeds per farm | Seed saving disabled |
+| --- | ---: | ---: |
+| Completed harvests | 71 | 2 |
+| Seeds saved | 77 | 0 |
+| Seed units left per farm | 4 | 0 |
+| Edible grain harvested | 205 | 5 |
+| Grain eaten by residents | 180 | 15 |
+| Farm owner hunger at day seven | 480 | 1,440 |
+
+The paired experiment ran 60 simulations across seeds 0–9 at 7, 30, and 90 days. It took about 67 seconds. Every run reconciled the seed and food balances and the 156-coin supply. At day 90, all runs with seed saving had four seeds per farm and residents had eaten 2,421 grain. The controls all stopped harvesting after two shifts and residents ate 14–17 grain.
+
+### Remaining Phase 1 work
+
+Seed saving requires an initial planting seed. A farm with none still needs a source of seed to restart. The next slice introduces paid seed purchases between farms and tests recovery from an empty reserve.
+
+## Ninth checkpoint — farm tool purchases, yields, and wear
+
+The `tools` scenario connects the forge back to farming. The blacksmith delivers hoes to the market, and farm owners pay 15 coins per hoe. At the farm, a farmer can install one hoe for the owner or a hired worker to use. A completed assisted harvest adds two grain and spends one of eight uses. The final use removes the hoe, letting the farm buy a replacement.
+
+### Verification
+
+```sh
+python -m unittest discover -s tests -v
+python -m living_world scenario tools --seed 8 --days 1 --json
+python -m living_world scenario tools --seed 8 --days 7 --json
+```
+
+All 68 tests passed in the installed Windows environment. A paired harvest used the same seed and planting cost with and without a hoe and measured exactly two extra grain. Tests also cover exclusive reservation, cancellation, wear, purchase and installation, fallback when ore is absent, saved actions, full ledger replay, and the earlier blacksmith digest.
+
+In seed 8, the first farmer paid for a hoe at minute 1088 and installed it at minute 1120. The first assisted harvest finished at minute 1222. The hoe wore out at minute 5023 and a replacement was installed at minute 5276. Seven days produced 29 assisted harvests, 58 bonus grain, three worn hoes, and three installed replacements. Splitting the run at day one matched the direct seven-day run.
+
+A batch of 60 independent runs used seeds 0–9 at 1, 7, 30, and 90 days with both upstream inputs available, plus seven-day cases with an empty ore deposit or an empty woodland. It took about 36 seconds. Every run reconciled materials, tool uses, and the 156-coin supply. At day seven every baseline run had installed three replacements and gained 54–60 bonus grain. At day 90 the baseline range was 352–798 bonus grain. The shortage runs continued ordinary harvests with zero tool purchases or uses.
+
+### Remaining Phase 1 work
+
+Farms can increase yield with tools and go back to ordinary harvests when tools wear out or supplies run short. The next slice lets farms retain part of a crop as seed and checks whether that extends food production under a low-seed start.
+
+## Eighth checkpoint — iron purchases and farm tools
+
+The `blacksmith` scenario adds a forge, a blacksmith, and funded iron purchases from the smelter. The smelter delivers iron to the market. The blacksmith carries purchased iron to the forge and reserves one unit per job. Each job takes 140 simulated minutes and consumes the iron to make one hoe.
+
+### Verification
+
+```sh
+python -m unittest discover -s tests -v
+python -m living_world scenario blacksmith --seed 8 --minutes 1039 --json
+python -m living_world scenario blacksmith --seed 8 --minutes 1040 --json
+python -m living_world scenario blacksmith --seed 8 --days 1 --json
+```
+
+All 61 tests passed in the installed Windows environment. Tests cover delivery before purchase, limited funds and stock, exact payment to the smelter, forge access, cancellations and retries, save replay, and full inventory reconciliation. The previous smelting scenario retained its seed-8 digest.
+
+In seed 8, the first iron reached the stall at minute 790. The blacksmith paid the smelter 12 coins at minute 883 and finished the first hoe at minute 1040. A saved run advanced through minutes 950, 1039, and 1040 and then to the end of day one matched the direct runs.
+
+A batch of 60 independent runs used seeds 0–9 at 1, 7, 30, and 90 days with both upstream inputs available, plus seven-day cases with an empty ore deposit or an empty woodland. It took about 28.7 seconds. Every run reconciled materials and the 156-coin supply. All baseline runs produced two hoes by day one and reached three by day seven. They paid the smelter 36 coins in total for three iron. Both shortage cases produced zero iron and zero hoes.
+
+### Remaining Phase 1 work
+
+The blacksmith starts with 42 coins and targets three hoes. Completed tools accumulate at the forge. The next slice lets farmers buy them and measures their effect on farming and the demand caused by wear.
+
+## Seventh checkpoint — paid inputs and iron smelting
+
+The `smelting` scenario adds a smelter, a smeltery, and funded purchases from both the miner and the charcoal burner. The charcoal burner delivers stock to the village market. Each smelting batch reserves two ore and one charcoal, then consumes them and credits one iron after 180 simulated minutes.
+
+### Verification
+
+```sh
+python -m unittest discover -s tests -v
+python -m living_world scenario smelting --seed 8 --minutes 753 --json
+python -m living_world scenario smelting --seed 8 --minutes 754 --json
+python -m living_world scenario smelting --seed 8 --days 1 --json
+```
+
+All 54 tests passed in the installed Windows environment. Tests cover purchases with finite stock and funds, exact payments to suppliers, charcoal in transit, both input shortages, cancellation and retry, saved batches, and full inventory reconciliation. The mining scenario retained its seed-8 digest.
+
+In seed 8, the smelter bought ore from the miner at minutes 232 and 241 and charcoal from the burner at minute 542. Those sales paid the miner four coins and the burner five. The first batch finished at minute 754. A saved run advanced through minutes 753 and 754 and then to the end of day one matched the direct runs.
+
+A batch of 60 independent runs used seeds 0–9 at horizons of 1, 7, 30, and 90 days with both inputs available, plus seven-day cases with an empty ore deposit or an empty woodland. It took about 28.3 seconds. Grain, seed, standing wood, firewood, ore, charcoal, iron, and the 114-coin supply reconciled in every run. All baseline runs reached four units of iron by day seven. All shortage runs produced zero iron. The available supplier was still paid in both shortage cases.
+
+### Remaining Phase 1 work
+
+Iron currently accumulates at the smeltery. The smelter targets four units and starts with 42 coins. The next slice adds a blacksmith who buys iron and uses it to make tools.
+
 ## Sixth checkpoint — iron ore mining and deliveries
 
 The `mining` scenario adds a miner, a finite deposit, and a market stall for iron ore. Extraction debits the deposit and credits mine stock. Deliveries reserve ore at the mine and move it to the market on arrival. The miner has a six-unit stock target and can take paid field work.

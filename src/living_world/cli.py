@@ -14,7 +14,10 @@ from .market import SHOCKS
 from .model import Config, Transfer, WorldError
 from .persistence import Save
 
-SCENARIOS = ("lab", "village", "market", "routes", "firewood", "charcoal", "mining")
+SCENARIOS = (
+    "lab", "village", "market", "routes", "firewood", "charcoal", "mining", "smelting",
+    "blacksmith", "tools", "seed-saving", "seed-trade",
+)
 
 
 def add_interval(parser: argparse.ArgumentParser, *, required: bool = True) -> None:

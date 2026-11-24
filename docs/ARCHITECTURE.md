@@ -54,4 +54,28 @@ The `mining` world adds a miner and a mine 40 simulated minutes from the square.
 
 A delivery reserves the ore at the mine. Arrival credits the miner's market stall in the same transaction that moves the miner. The miner aims to keep six units at the stall and can take paid farm shifts when short on food money. The stall holds ore in preparation for the smelting slice.
 
-See [ADR 0001](adr/0001-transactional-snapshot.md) for persistence, [ADR 0002](adr/0002-standing-grain-offers.md) for pricing, [ADR 0003](adr/0003-village-travel.md) for travel, [ADR 0004](adr/0004-firewood-and-hearths.md) for hearths, [ADR 0005](adr/0005-charcoal-batches.md) for charcoal, [ADR 0006](adr/0006-ore-extraction-and-delivery.md) for ore, and [Progress](PROGRESS.md) for observed results.
+## Smeltery and iron
+
+The `smelting` world adds a smelter and a smeltery 30 simulated minutes from the square. The charcoal burner now delivers goods to a stall. The smelter buys ore for two coins per unit from the miner and charcoal for five coins per unit from the charcoal burner. Purchases reserve stall stock and the buyer's coins, then settle against the supplier's wallet at the square.
+
+The smelter carries purchases to the smeltery. Each 180-minute batch reserves two ore and one charcoal. It consumes both and credits one iron on completion. Cancellation releases both holds. The smelter starts with 42 coins and aims to keep four iron in stock while waiting for demand from a forge.
+
+## Forge and farm tools
+
+The `blacksmith` world adds a forge 15 simulated minutes from the market square. The smelter delivers iron to a stall using the existing timed transport. Iron trades for 12 coins per unit. The blacksmith buys at the square, carries iron back to the forge, and reserves one unit per hoe. Forging takes 140 simulated minutes and records consumption and the new hoe in the same transaction.
+
+The blacksmith starts with 42 coins and targets three hoes in forge stock. Completed hoes accumulate at the forge pending farm demand in a later slice.
+
+## Farm purchases and tool wear
+
+In the `tools` world, the blacksmith delivers hoes to a stall. A farm owner pays 15 coins for one, carries it back, and installs it at their farm. The owner and hired farmhands can use it. One active harvest reserves the hoe at a time. Other workers can carry on with ordinary harvests while it is in use.
+
+A completed assisted harvest grows two extra grain and spends one of the hoe's eight uses. The final use removes the worn hoe from inventory. Purchase, installation, grain output, and retirement have journal records. An affordable replacement can restart the cycle. Tool condition persists with the farm and an interrupted job releases its hold.
+
+## Saving seed from harvests
+
+In `seed-saving`, harvest completion spends one planting seed, adds any hoe bonus to the crop, and saves up to half the crop rounded down to bring the farm toward a four-seed reserve. The farm's current seed balance after planting determines how much it saves. Both output movements go into the same transaction, so later completions use the updated reserve. Edible grain and seed are separate pantry goods. A one-grain harvest yields one unit of food. A farm with an empty seed reserve has to wait for seed before it can plant.
+
+In `seed-trade`, a farm owner can buy one seed at a neighbor's field for two coins. The sale uses surplus after existing reservations and leaves at least the seller's reserve target or one seed when the target is zero. The buyer carries the seed home and unloads it into the pantry. Seed travels in personal inventory and is available for planting after unloading.
+
+See [ADR 0001](adr/0001-transactional-snapshot.md) for persistence, [ADR 0002](adr/0002-standing-grain-offers.md) for pricing, [ADR 0003](adr/0003-village-travel.md) for travel, [ADR 0004](adr/0004-firewood-and-hearths.md) for hearths, [ADR 0005](adr/0005-charcoal-batches.md) for charcoal, [ADR 0006](adr/0006-ore-extraction-and-delivery.md) for ore, [ADR 0007](adr/0007-smelting.md) for smelting, [ADR 0008](adr/0008-forging.md) for forging, [ADR 0009](adr/0009-farm-tool-wear.md) for farm tools, [ADR 0010](adr/0010-seed-saving.md) for seed saving, and [Progress](PROGRESS.md) for observed results.

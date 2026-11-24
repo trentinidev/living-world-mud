@@ -6,12 +6,12 @@ from collections.abc import Iterator
 
 from . import forestry, routes
 from .model import (
-    CHARCOAL, CHARCOAL_CONTENT_VERSION, COIN, FIREWOOD, GRAIN, KILN_CONTENT_VERSIONS, Actor, CharcoalIntent,
-    FirewoodIntent, Movement, Travel, World, WorldError,
+    CHARCOAL, CHARCOAL_CONTENT_VERSION, COIN, FIREWOOD, GRAIN, KILN_CONTENT_VERSIONS,
+    SMELTING_CONTENT_VERSIONS, Actor, CharcoalDelivery, CharcoalIntent, FirewoodIntent, Movement,
+    Travel, World, WorldError,
 )
-from .routes import CHARCOAL_BURNER, KILN, MARKET_SQUARE, WOODCUTTER
+from .routes import CHARCOAL_BURNER, KILN, KILN_STOCK, MARKET_SQUARE, WOODCUTTER
 
-KILN_STOCK = "kiln-stock"
 BATCH_MINUTES = 160
 FIREWOOD_PER_BATCH = 2
 CHARCOAL_TARGET = 4
@@ -44,11 +44,32 @@ def movements(intent: CharcoalIntent) -> tuple[Movement, ...]:
     )
 
 
+def to_market(world: World, available: forestry.Available) -> Travel:
+    duration = routes.distance(world, KILN, MARKET_SQUARE)
+    quantity = min(available(KILN_STOCK, CHARCOAL),
+                   CHARCOAL_TARGET - available(routes.stall(CHARCOAL_BURNER), CHARCOAL))
+    if quantity > 0:
+        return CharcoalDelivery(CHARCOAL_BURNER, KILN, MARKET_SQUARE, duration, charcoal=quantity)
+    return Travel(CHARCOAL_BURNER, KILN, MARKET_SQUARE, duration)
+
+
 def work(world: World, available: forestry.Available) -> Iterator[CharcoalIntent | FirewoodIntent | Travel]:
     actor = world.actors[CHARCOAL_BURNER]
-    if not actor.can_work or available(KILN_STOCK, CHARCOAL) >= CHARCOAL_TARGET:
+    if not actor.can_work:
         return
     site = actor.location
+    local_stock = available(KILN_STOCK, CHARCOAL)
+    if world.content_version in SMELTING_CONTENT_VERSIONS:
+        if available(routes.stall(CHARCOAL_BURNER), CHARCOAL) >= CHARCOAL_TARGET:
+            return
+        if local_stock:
+            if site == KILN:
+                yield to_market(world, available)
+            else:
+                yield routes.next_leg(world, CHARCOAL_BURNER, site, KILN)
+            return
+    elif local_stock >= CHARCOAL_TARGET:
+        return
     missing = FIREWOOD_PER_BATCH - available(CHARCOAL_BURNER, FIREWOOD)
     if missing <= 0:
         if site == KILN:

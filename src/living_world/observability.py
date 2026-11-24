@@ -6,13 +6,15 @@ from collections import Counter
 from collections.abc import Iterable
 from dataclasses import asdict
 
-from . import forestry, kiln, market, mining, routes
+from . import blacksmith, forestry, kiln, market, mining, routes, smelting
 from .model import (
-    CHARCOAL, COIN, FARMSTEAD, FIREWOOD, FORESTRY_CONTENT_VERSIONS, GRAIN, IRON_ORE,
-    KILN_CONTENT_VERSIONS, MINING_CONTENT_VERSION, ORE_IN_VEIN, SEED_GRAIN, SPATIAL_CONTENT_VERSIONS,
-    STANDING_WOOD, CharcoalIntent, FirewoodDelivery, OreDelivery, Travel, World,
+    BLACKSMITH_CONTENT_VERSIONS, CHARCOAL, COIN, FARMSTEAD, FIREWOOD, FORESTRY_CONTENT_VERSIONS,
+    GRAIN, IRON, IRON_HOE, IRON_ORE, KILN_CONTENT_VERSIONS, MINING_CONTENT_VERSIONS, ORE_IN_VEIN,
+    SEED_GRAIN, SEED_SAVING_CONTENT_VERSIONS, SEED_TRADE_CONTENT_VERSION, SMELTING_CONTENT_VERSIONS, SPATIAL_CONTENT_VERSIONS,
+    STANDING_WOOD, TOOLS_CONTENT_VERSIONS, CharcoalDelivery, CharcoalIntent, FirewoodDelivery, ForgeIntent,
+    HoeDelivery, IronDelivery, OreDelivery, SmeltingIntent, Travel, World,
 )
-from .routes import CHARCOAL_BURNER, FARMS, MINE_STOCK, MINER, WOODCUTTER
+from .routes import BLACKSMITH, CHARCOAL_BURNER, FARMS, MINE_STOCK, MINER, SMELTER, WOODCUTTER
 from .village import hunger_at
 
 
@@ -41,6 +43,22 @@ def village_metrics(
     charcoal_produced = 0
     ore_extracted = 0
     ore_delivered = 0
+    charcoal_delivered = 0
+    iron_delivered = 0
+    industrial_purchases: Counter[str] = Counter()
+    industrial_payments: Counter[str] = Counter()
+    smelting_inputs: Counter[str] = Counter()
+    iron_produced = 0
+    forging_inputs: Counter[str] = Counter()
+    hoes_forged = 0
+    hoes_delivered = 0
+    hoes_worn_out = 0
+    assisted_harvests = 0
+    bonus_grain = 0
+    seeds_planted = 0
+    seeds_saved = 0
+    seed_purchase_coins = 0
+    installed_by_farm: Counter[str] = Counter()
     travel_minutes = 0
     shocks: list[dict[str, object]] = []
     for minute, kind, payload in events:
@@ -64,17 +82,31 @@ def village_metrics(
                 firewood_for_kiln += 1
             elif payload["actor"] in FARMS:
                 firewood_for_hearths += 1
+        if kind == "install_hoe_completed":
+            installed_by_farm[payload["actor"]] += 1
+        if kind == "harvest_completed" and "hoe_bonus_grain" in payload:
+            assisted_harvests += 1
+            bonus_grain += payload["hoe_bonus_grain"]
         for movement in payload.get("movements", ()):
             good, quantity = movement["good"], movement["quantity"]
             if kind == "harvest_completed":
                 if good == GRAIN:
                     grain_produced += quantity
+                elif good == SEED_GRAIN:
+                    if movement["source"] is None:
+                        seeds_saved += quantity
+                    else:
+                        seeds_planted += quantity
                 elif good == COIN:
                     wages += quantity
+                elif good == IRON_HOE:
+                    hoes_worn_out += quantity
             elif kind == "eat_completed":
                 grain_eaten += quantity
             elif kind == "buy_food_completed" and good == COIN:
                 sales += quantity
+            elif kind == "buy_seed_completed" and good == COIN:
+                seed_purchase_coins += quantity
             elif kind == "travel_completed":
                 if good == GRAIN:
                     grain_delivered += quantity
@@ -82,6 +114,12 @@ def village_metrics(
                     wood_delivered += quantity
                 elif good == IRON_ORE:
                     ore_delivered += quantity
+                elif good == CHARCOAL:
+                    charcoal_delivered += quantity
+                elif good == IRON:
+                    iron_delivered += quantity
+                elif good == IRON_HOE:
+                    hoes_delivered += quantity
             elif kind == "cut_wood_completed" and good == FIREWOOD:
                 wood_cut += quantity
             elif kind == "burn_firewood_completed" and good == FIREWOOD:
@@ -97,6 +135,21 @@ def village_metrics(
                     charcoal_produced += quantity
             elif kind == "mine_ore_completed" and good == IRON_ORE:
                 ore_extracted += quantity
+            elif kind in ("buy_iron_ore_completed", "buy_charcoal_completed", "buy_iron_completed", "buy_hoe_completed"):
+                if good == COIN:
+                    industrial_payments[kind] += quantity
+                else:
+                    industrial_purchases[good] += quantity
+            elif kind == "smelt_iron_completed":
+                if good == IRON:
+                    iron_produced += quantity
+                else:
+                    smelting_inputs[good] += quantity
+            elif kind == "forge_hoe_completed":
+                if good == IRON_HOE:
+                    hoes_forged += quantity
+                else:
+                    forging_inputs[good] += quantity
     metrics: dict[str, object] = {
         "grain_produced": grain_produced,
         "grain_eaten": grain_eaten,
@@ -146,6 +199,10 @@ def village_metrics(
                         **({"firewood": action.intent.firewood}
                            if isinstance(action.intent, FirewoodDelivery) else {}),
                         **({"ore": action.intent.ore} if isinstance(action.intent, OreDelivery) else {}),
+                        **({"charcoal": action.intent.charcoal}
+                           if isinstance(action.intent, CharcoalDelivery) else {}),
+                        **({"iron": action.intent.iron} if isinstance(action.intent, IronDelivery) else {}),
+                        **({"hoes": action.intent.hoes} if isinstance(action.intent, HoeDelivery) else {}),
                     }
                     for action in world.actions.values()
                     if action.status == "started" and isinstance(action.intent, Travel)
@@ -190,7 +247,7 @@ def village_metrics(
                     None,
                 ),
             }
-        if world.content_version == MINING_CONTENT_VERSION:
+        if world.content_version in MINING_CONTENT_VERSIONS:
             metrics["mining"] = {
                 "deposit_remaining": world.inventory[mining.DEPOSIT][ORE_IN_VEIN],
                 "ore_extracted": ore_extracted,
@@ -202,5 +259,75 @@ def village_metrics(
                      if action.status == "started" and isinstance(action.intent, OreDelivery)),
                     None,
                 ),
+            }
+        if world.content_version in SMELTING_CONTENT_VERSIONS:
+            metrics["smelting"] = {
+                "ore_purchased": industrial_purchases[IRON_ORE],
+                "charcoal_purchased": industrial_purchases[CHARCOAL],
+                "coins_paid_to_miner": industrial_payments["buy_iron_ore_completed"],
+                "coins_paid_to_charcoal_burner": industrial_payments["buy_charcoal_completed"],
+                "charcoal_delivered": charcoal_delivered,
+                "charcoal_at_market": world.inventory[routes.stall(CHARCOAL_BURNER)][CHARCOAL],
+                "ore_consumed": smelting_inputs[IRON_ORE],
+                "charcoal_consumed": smelting_inputs[CHARCOAL],
+                "iron_produced": iron_produced,
+                "iron_in_stock": world.inventory[smelting.IRON_STOCK][IRON],
+                "smelter_coins": world.inventory[SMELTER][COIN],
+                "batch_finishes_at": next(
+                    (action.finishes_at for action in world.actions.values()
+                     if action.status == "started" and isinstance(action.intent, SmeltingIntent)
+                     and action.intent.kind == "smelt_iron"),
+                    None,
+                ),
+            }
+        if world.content_version in BLACKSMITH_CONTENT_VERSIONS:
+            metrics["blacksmith"] = {
+                "iron_delivered": iron_delivered,
+                "iron_at_market": world.inventory[routes.stall(SMELTER)][IRON],
+                "iron_purchased": industrial_purchases[IRON],
+                "coins_paid_to_smelter": industrial_payments["buy_iron_completed"],
+                "iron_consumed": forging_inputs[IRON],
+                "hoes_forged": hoes_forged,
+                "hoes_in_stock": world.inventory[blacksmith.TOOL_STOCK][IRON_HOE],
+                "blacksmith_coins": world.inventory[BLACKSMITH][COIN],
+                "forge_finishes_at": next(
+                    (action.finishes_at for action in world.actions.values()
+                     if action.status == "started" and isinstance(action.intent, ForgeIntent)
+                     and action.intent.kind == "forge_hoe"),
+                    None,
+                ),
+            }
+        if world.content_version in TOOLS_CONTENT_VERSIONS:
+            metrics["tools"] = {
+                "hoes_delivered": hoes_delivered,
+                "hoes_at_market": world.inventory[routes.stall(BLACKSMITH)][IRON_HOE],
+                "hoes_bought": industrial_purchases[IRON_HOE],
+                "coins_paid_to_blacksmith": industrial_payments["buy_hoe_completed"],
+                "hoes_installed": sum(installed_by_farm.values()),
+                "hoes_worn_out": hoes_worn_out,
+                "replacement_hoes_installed": sum(count - 1 for count in installed_by_farm.values()),
+                "assisted_harvests": assisted_harvests,
+                "bonus_grain": bonus_grain,
+                "remaining_uses_by_farm": world.hoe_uses.copy(),
+            }
+        if world.content_version in SEED_SAVING_CONTENT_VERSIONS:
+            metrics["seed_saving"] = {
+                "reserve_target": world.config.village.seed_reserve_target,
+                "seeds_planted": seeds_planted,
+                "seeds_saved": seeds_saved,
+                "seed_by_farm": {
+                    farm: world.inventory[routes.pantry(farm)][SEED_GRAIN] for farm in FARMS
+                },
+                "food_grain_harvested": grain_produced,
+                "total_grain_harvested": grain_produced + seeds_saved,
+            }
+        if world.content_version == SEED_TRADE_CONTENT_VERSION:
+            metrics["seed_trade"] = {
+                "seeds_purchased": counts["buy_seed_completed"],
+                "coins_paid_for_seed": seed_purchase_coins,
+                "seeds_unloaded": counts["store_seed_completed"],
+                "seeds_carried_by_farm": {
+                    farm: world.inventory[farm].get(SEED_GRAIN, 0) for farm in FARMS
+                },
             }
     return metrics

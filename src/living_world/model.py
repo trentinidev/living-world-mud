@@ -14,7 +14,17 @@ ROUTES_CONTENT_VERSION = "village-routes-1"
 FIREWOOD_CONTENT_VERSION = "village-firewood-1"
 CHARCOAL_CONTENT_VERSION = "village-charcoal-1"
 MINING_CONTENT_VERSION = "village-mining-1"
-KILN_CONTENT_VERSIONS = (CHARCOAL_CONTENT_VERSION, MINING_CONTENT_VERSION)
+SMELTING_CONTENT_VERSION = "village-smelting-1"
+BLACKSMITH_CONTENT_VERSION = "village-blacksmith-1"
+TOOLS_CONTENT_VERSION = "village-tools-1"
+SEED_SAVING_CONTENT_VERSION = "village-seed-saving-1"
+SEED_TRADE_CONTENT_VERSION = "village-seed-trade-1"
+SEED_SAVING_CONTENT_VERSIONS = (SEED_SAVING_CONTENT_VERSION, SEED_TRADE_CONTENT_VERSION)
+TOOLS_CONTENT_VERSIONS = (TOOLS_CONTENT_VERSION, *SEED_SAVING_CONTENT_VERSIONS)
+BLACKSMITH_CONTENT_VERSIONS = (BLACKSMITH_CONTENT_VERSION, *TOOLS_CONTENT_VERSIONS)
+SMELTING_CONTENT_VERSIONS = (SMELTING_CONTENT_VERSION, *BLACKSMITH_CONTENT_VERSIONS)
+MINING_CONTENT_VERSIONS = (MINING_CONTENT_VERSION, *SMELTING_CONTENT_VERSIONS)
+KILN_CONTENT_VERSIONS = (CHARCOAL_CONTENT_VERSION, *MINING_CONTENT_VERSIONS)
 FORESTRY_CONTENT_VERSIONS = (FIREWOOD_CONTENT_VERSION, *KILN_CONTENT_VERSIONS)
 SPATIAL_CONTENT_VERSIONS = (ROUTES_CONTENT_VERSION, *FORESTRY_CONTENT_VERSIONS)
 MARKET_CONTENT_VERSIONS = (MARKET_CONTENT_VERSION, *SPATIAL_CONTENT_VERSIONS)
@@ -29,8 +39,11 @@ FIREWOOD = "firewood"
 CHARCOAL = "charcoal"
 ORE_IN_VEIN = "ore_in_vein"
 IRON_ORE = "iron_ore"
+IRON = "iron"
+IRON_HOE = "iron_hoe"
 DEFAULT_STANDING_WOOD = 240
 DEFAULT_ORE_DEPOSIT = 120
+DEFAULT_SEED_RESERVE_TARGET = 4
 FARM_OWNER = "farm-owner"
 FARMSTEAD = "alderwick-farm"
 
@@ -77,6 +90,7 @@ class VillageConfig:
     fatigue_limit: int = 4
     work_fatigue: int = 2
     pantry_target: int = 10
+    seed_reserve_target: int = DEFAULT_SEED_RESERVE_TARGET
 
     def __post_init__(self) -> None:
         integer("village.farmhands", self.farmhands, 1, 8)
@@ -88,6 +102,7 @@ class VillageConfig:
         for name in ("harvest_min", "wage", "meal_price", "fatigue_limit", "work_fatigue", "pantry_target"):
             integer(f"village.{name}", getattr(self, name), 1, MAX_QUANTITY)
         integer("village.harvest_max", self.harvest_max, self.harvest_min, MAX_QUANTITY)
+        integer("village.seed_reserve_target", self.seed_reserve_target, 0, MAX_QUANTITY)
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,6 +181,11 @@ class MarketIntent:
 
 
 @dataclass(frozen=True, slots=True)
+class HoeHarvest(MarketIntent):
+    with_hoe: Literal[True] = True
+
+
+@dataclass(frozen=True, slots=True)
 class Travel:
     kind: ClassVar[Literal["travel"]] = "travel"
     actor: str
@@ -183,6 +203,21 @@ class FirewoodDelivery(Travel):
 @dataclass(frozen=True, slots=True)
 class OreDelivery(Travel):
     ore: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class CharcoalDelivery(Travel):
+    charcoal: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class IronDelivery(Travel):
+    iron: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class HoeDelivery(Travel):
+    hoes: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -209,7 +244,42 @@ class MiningIntent:
     quantity: int
 
 
-Intent = Transfer | VillageIntent | MarketIntent | Travel | FirewoodIntent | CharcoalIntent | MiningIntent
+@dataclass(frozen=True, slots=True)
+class SmeltingIntent:
+    kind: Literal["buy_iron_ore", "buy_charcoal", "smelt_iron"]
+    actor: str
+    duration: int
+    price: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ForgeIntent:
+    kind: Literal["buy_iron", "forge_hoe"]
+    actor: str
+    duration: int
+    price: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ToolIntent:
+    kind: Literal["buy_hoe", "install_hoe"]
+    actor: str
+    duration: int
+    price: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SeedIntent:
+    kind: Literal["buy_seed", "store_seed"]
+    actor: str
+    duration: int
+    seller: str | None = None
+
+
+Intent = (
+    Transfer | VillageIntent | MarketIntent | Travel | FirewoodIntent
+    | CharcoalIntent | MiningIntent | SmeltingIntent | ForgeIntent | ToolIntent | SeedIntent
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -263,10 +333,16 @@ class World:
     queue: list[Scheduled] = field(default_factory=list)
     rules_version: int = RULES_VERSION
     content_version: str = LAB_CONTENT_VERSION
+    hoe_uses: dict[str, int] = field(default_factory=dict)
 
     def snapshot(self) -> dict[str, object]:
         data = asdict(self)
         data["queue"] = [asdict(event) for event in sorted(self.queue)]
+        if self.content_version not in TOOLS_CONTENT_VERSIONS:
+            del data["hoe_uses"]
+        if (self.content_version not in SEED_SAVING_CONTENT_VERSIONS
+                and self.config.village.seed_reserve_target == DEFAULT_SEED_RESERVE_TARGET):
+            del data["config"]["village"]["seed_reserve_target"]
         if self.content_version not in MARKET_CONTENT_VERSIONS:
             for actor in data["actors"].values():
                 del actor["can_work"]
@@ -275,7 +351,8 @@ class World:
                 del data["config"]["starting_standing_wood"]
             for actor in data["actors"].values():
                 del actor["warm_until"]
-        if self.content_version != MINING_CONTENT_VERSION and self.config.starting_ore_deposit == DEFAULT_ORE_DEPOSIT:
+        if (self.content_version not in MINING_CONTENT_VERSIONS
+                and self.config.starting_ore_deposit == DEFAULT_ORE_DEPOSIT):
             del data["config"]["starting_ore_deposit"]
         return data
 
@@ -288,12 +365,20 @@ class World:
         actions: dict[str, Action] = {}
         for key, value in data["actions"].items():
             raw_intent = value["intent"]
-            if "ore" in raw_intent:
-                intent: Intent = OreDelivery(**raw_intent)
+            if "hoes" in raw_intent:
+                intent: Intent = HoeDelivery(**raw_intent)
+            elif "iron" in raw_intent:
+                intent = IronDelivery(**raw_intent)
+            elif "charcoal" in raw_intent:
+                intent = CharcoalDelivery(**raw_intent)
+            elif "ore" in raw_intent:
+                intent = OreDelivery(**raw_intent)
             elif "firewood" in raw_intent:
                 intent = FirewoodDelivery(**raw_intent)
             elif "destination" in raw_intent:
                 intent = Travel(**raw_intent)
+            elif "with_hoe" in raw_intent:
+                intent = HoeHarvest(**raw_intent)
             elif "farm" in raw_intent:
                 intent = MarketIntent(**raw_intent)
             elif raw_intent.get("kind") in ("cut_wood", "buy_firewood", "burn_firewood"):
@@ -302,6 +387,14 @@ class World:
                 intent = CharcoalIntent(**raw_intent)
             elif raw_intent.get("kind") == "mine_ore":
                 intent = MiningIntent(**raw_intent)
+            elif raw_intent.get("kind") in ("buy_iron_ore", "buy_charcoal", "smelt_iron"):
+                intent = SmeltingIntent(**raw_intent)
+            elif raw_intent.get("kind") in ("buy_iron", "forge_hoe"):
+                intent = ForgeIntent(**raw_intent)
+            elif raw_intent.get("kind") in ("buy_hoe", "install_hoe"):
+                intent = ToolIntent(**raw_intent)
+            elif raw_intent.get("kind") in ("buy_seed", "store_seed"):
+                intent = SeedIntent(**raw_intent)
             elif "kind" in raw_intent:
                 intent = VillageIntent(**raw_intent)
             else:
