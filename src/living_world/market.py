@@ -9,8 +9,8 @@ from typing import Literal
 
 from . import blacksmith, farm_tools, forestry, kiln, mining, routes, seed_trade, smelting, village
 from .model import (
-    BLACKSMITH_CONTENT_VERSIONS, COIN, FARM_OWNER, FARMSTEAD, FORESTRY_CONTENT_VERSIONS, GRAIN,
-    MARKET_CONTENT_VERSION, MARKET_CONTENT_VERSIONS, SEED_GRAIN, SEED_TRADE_CONTENT_VERSION, SMELTING_CONTENT_VERSIONS,
+    BLACKSMITH_CONTENT_VERSIONS, COIN, FARM_OWNER, FARMSTEAD, FIREWOOD, FORESTRY_CONTENT_VERSIONS, GRAIN,
+    HAMLET_CONTENT_VERSION, MARKET_CONTENT_VERSION, STANDING_WOOD, MARKET_CONTENT_VERSIONS, SEED_GRAIN, SEED_TRADE_CONTENT_VERSIONS, SMELTING_CONTENT_VERSIONS,
     SPATIAL_CONTENT_VERSIONS, TOOLS_CONTENT_VERSIONS, Actor, Config, Intent, MarketIntent,
     VillageIntent, World, WorldError,
 )
@@ -29,8 +29,8 @@ class GrainOffer:
     price: int
 
 
-def create_market(seed: int, config: Config, generation: Random) -> World:
-    world = village.create_village(seed, config, generation)
+def create_market(seed: int, config: Config, generation: Random, farmhands: int | None = None) -> World:
+    world = village.create_village(seed, config, generation, farmhands)
     world.content_version = MARKET_CONTENT_VERSION
     world.actors[WEST_FARM] = Actor("Tessa", FARMSTEAD)
     world.inventory[WEST_FARM] = world.inventory[FARM_OWNER].copy()
@@ -120,6 +120,18 @@ def choices(
                 yield MarketIntent("harvest", actor_id, settings.harvest_minutes, farm)
 
 
+def woodcutter_out_of_work(world: World, available: Available) -> bool:
+    """In the hamlet, a woodcutter seeks field shifts when there is nothing left to cut,
+    or when cash is low and stock already at the stall is not selling."""
+    if world.content_version != HAMLET_CONTENT_VERSION:
+        return False
+    exhausted = (not available(forestry.WOODLAND_STOCK, STANDING_WOOD)
+                 and not available(routes.WOODPILE, FIREWOOD))
+    unsold = (available(routes.stall(routes.WOODCUTTER), FIREWOOD) > 0
+              and available(routes.WOODCUTTER, COIN) < world.config.village.meal_price * 4)
+    return exhausted or unsold
+
+
 def route_choices(
     world: World, actor_id: str, available: Available, shift_open: Callable[[str], bool],
     hoe_is_free: Callable[[str], bool],
@@ -169,7 +181,7 @@ def route_choices(
     if actor.fatigue >= settings.fatigue_limit:
         yield VillageIntent("rest", actor_id, settings.rest_minutes)
         return
-    if world.content_version == SEED_TRADE_CONTENT_VERSION and home:
+    if world.content_version in SEED_TRADE_CONTENT_VERSIONS and home:
         yield from seed_trade.procurement(world, actor_id, available)
     if world.content_version in TOOLS_CONTENT_VERSIONS and home:
         yield from farm_tools.procurement(world, actor_id, available, delivery_grain)
@@ -181,7 +193,7 @@ def route_choices(
         yield from smelting.work(world, available)
     elif actor_id == routes.BLACKSMITH:
         yield from blacksmith.work(world, available)
-    if actor_id == routes.WOODCUTTER:
+    if actor_id == routes.WOODCUTTER and not woodcutter_out_of_work(world, available):
         yield from forestry.work(world, available)
     elif home:
         if site != home:

@@ -10,7 +10,7 @@ from random import Random
 from . import blacksmith, farm_tools, forestry, kiln, market, mining, routes, seed_trade, smelting, village
 from .model import (
     COIN, FARM_OWNER, GRAIN, MARKET_CONTENT_VERSION, MARKET_CONTENT_VERSIONS, MAX_CLOCK, MAX_QUANTITY,
-    SEED_GRAIN, SEED_SAVING_CONTENT_VERSION, SEED_TRADE_CONTENT_VERSION, SPATIAL_CONTENT_VERSIONS, VILLAGE_CONTENT_VERSIONS,
+    SEED_GRAIN, SEED_SAVING_CONTENT_VERSION, SEED_TRADE_CONTENT_VERSION, HAMLET_CONTENT_VERSION, SPATIAL_CONTENT_VERSIONS, VILLAGE_CONTENT_VERSIONS,
     Action, Actor, CharcoalIntent,
     Config, Event, FirewoodIntent, ForgeIntent, HoeHarvest, Intent, MarketIntent, MiningIntent,
     Movement, Scheduled, SeedIntent, SmeltingIntent, ToolIntent, Transfer, Travel, VillageIntent,
@@ -36,7 +36,8 @@ class Simulation:
     def create(cls, seed: int, config: Config, scenario: str = "lab") -> Simulation:
         integer("seed", seed, -MAX_CLOCK - 1, MAX_CLOCK)
         rng = Random(f"living-world:generation:{seed}")
-        with_seed_trade = scenario == "seed-trade"
+        hamlet = scenario == "hamlet"
+        with_seed_trade = scenario in ("seed-trade", "hamlet")
         if with_seed_trade:
             scenario = "seed-saving"
         if scenario == "lab":
@@ -58,7 +59,7 @@ class Simulation:
             "market", "routes", "firewood", "charcoal", "mining", "smelting", "blacksmith", "tools",
             "seed-saving",
         ):
-            world = market.create_market(seed, config, rng)
+            world = market.create_market(seed, config, rng, config.hamlet.farmhands if hamlet else None)
             if scenario != "market":
                 routes.separate_sites(world)
             if scenario in ("firewood", "charcoal", "mining", "smelting", "blacksmith", "tools", "seed-saving"):
@@ -75,6 +76,8 @@ class Simulation:
                 farm_tools.enable_tools(world)
             if scenario == "seed-saving":
                 world.content_version = SEED_TRADE_CONTENT_VERSION if with_seed_trade else SEED_SAVING_CONTENT_VERSION
+                if hamlet:
+                    world.content_version = HAMLET_CONTENT_VERSION
         else:
             raise WorldError(f"unknown scenario {scenario!r}")
         sim = cls(world)
@@ -247,11 +250,13 @@ class Simulation:
             raise WorldError(f"the hired field shift is occupied at {intent.farm}")
 
     def hired_shift_open(self, farm: str) -> bool:
-        return not any(
+        shifts = (self.world.config.hamlet.hired_shifts_per_farm
+                  if self.world.content_version == HAMLET_CONTENT_VERSION else 1)
+        return sum(
             isinstance(action.intent, MarketIntent) and action.intent.kind == "harvest"
             and action.intent.farm == farm and action.intent.actor != farm
             for action in self.active.values()
-        )
+        ) < shifts
 
     def hoe_is_free(self, farm: str) -> bool:
         return not any(isinstance(action.intent, HoeHarvest) and action.intent.farm == farm

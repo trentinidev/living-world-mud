@@ -13,10 +13,11 @@ from tempfile import TemporaryDirectory
 from .market import SHOCKS
 from .model import Config, Transfer, WorldError
 from .persistence import Save
+from .report import parse_seeds, viability_report
 
 SCENARIOS = (
     "lab", "village", "market", "routes", "firewood", "charcoal", "mining", "smelting",
-    "blacksmith", "tools", "seed-saving", "seed-trade",
+    "blacksmith", "tools", "seed-saving", "seed-trade", "hamlet",
 )
 
 
@@ -65,6 +66,15 @@ def parser() -> argparse.ArgumentParser:
     scenario.add_argument("--json", action="store_true", help="output structured JSON (default)")
     scenario.add_argument("--shock", choices=SHOCKS, help="disrupt the market after one day")
     add_interval(scenario, required=False)
+
+    report = commands.add_parser("report", help="run a zero-player viability report across seeds")
+    report.add_argument("name", choices=SCENARIOS)
+    report.add_argument("--seeds", type=parse_seeds, default=list(range(10)), help="e.g. 0-9 or 1,4,8")
+    report.add_argument("--days", type=lambda text: [int(day) for day in text.split(",")],
+                        default=[1, 7, 30, 90], help="comma-separated horizons, e.g. 1,7,30,90")
+    report.add_argument("--config", type=Path, help="JSON overrides for world configuration")
+    report.add_argument("--shock", choices=SHOCKS, help="disrupt the market after one day")
+    report.add_argument("--json", action="store_true", help="output structured JSON (default)")
     return root
 
 
@@ -76,6 +86,8 @@ def dispatch(args: argparse.Namespace) -> dict[str, object]:
     if args.command == "create":
         return Save.create(args.save, args.seed, get_config(args.config),
                            scenario=args.scenario).summary()
+    if args.command == "report":
+        return viability_report(args.name, args.seeds, args.days, get_config(args.config), args.shock)
     if args.command == "scenario":
         config = get_config(args.config)
         if args.shock and args.name in ("lab", "village"):

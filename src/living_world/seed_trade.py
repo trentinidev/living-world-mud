@@ -4,13 +4,13 @@ from collections.abc import Iterator
 
 from . import routes
 from .forestry import Available
-from .model import COIN, SEED_GRAIN, SEED_TRADE_CONTENT_VERSION, Movement, SeedIntent, Travel, World, WorldError
+from .model import COIN, SEED_GRAIN, SEED_TRADE_CONTENT_VERSIONS, Movement, SeedIntent, Travel, World, WorldError
 
 SEED_PRICE = 2
 
 
 def validate(world: World, intent: SeedIntent) -> None:
-    if world.content_version != SEED_TRADE_CONTENT_VERSION or intent.actor not in routes.FARMS:
+    if world.content_version not in SEED_TRADE_CONTENT_VERSIONS or intent.actor not in routes.FARMS:
         raise WorldError("seed trade requires a farm owner and a seed-trade save")
     site = world.actors[intent.actor].location
     if intent.kind == "buy_seed":

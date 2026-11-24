@@ -15,15 +15,26 @@ from .model import (
 )
 
 FARMHAND_NAMES = ("Bren", "Oda", "Tavin", "Neri", "Merrit", "Sela", "Iven", "Linna")
+NAME_ONSETS = ("Al", "Bel", "Cor", "Dun", "Eli", "Fen", "Gar", "Hal", "Ish", "Jor", "Kel", "Lor", "Mab", "Nol")
+NAME_ENDINGS = ("a", "en", "ith", "or", "wyn", "ric", "elle", "an")
 
 
-def create_village(seed: int, config: Config, generation: Random) -> World:
+def farmhand_names(generation: Random, count: int) -> list[str]:
+    """Sample the original catalog, then draw generated names only for larger villages."""
+    names = generation.sample(FARMHAND_NAMES, min(count, len(FARMHAND_NAMES)))
+    if count > len(FARMHAND_NAMES):
+        extras = sorted(onset + ending for onset in NAME_ONSETS for ending in NAME_ENDINGS)
+        names += generation.sample([name for name in extras if name not in names], count - len(names))
+    return names
+
+
+def create_village(seed: int, config: Config, generation: Random, farmhands: int | None = None) -> World:
     settings = config.village
     for duration in (settings.harvest_minutes, settings.purchase_minutes,
                      settings.eat_minutes, settings.rest_minutes):
         if duration > config.max_action_minutes:
             raise WorldError("village activity duration exceeds max_action_minutes")
-    names = generation.sample(FARMHAND_NAMES, settings.farmhands)
+    names = farmhand_names(generation, settings.farmhands if farmhands is None else farmhands)
     actors = {FARM_OWNER: Actor("Marra", FARMSTEAD)}
     actors.update({f"farmhand-{index}": Actor(name, FARMSTEAD) for index, name in enumerate(names, 1)})
     inventory = {actor: {GRAIN: 0, COIN: settings.starting_hand_coin} for actor in actors}

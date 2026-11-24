@@ -19,7 +19,9 @@ BLACKSMITH_CONTENT_VERSION = "village-blacksmith-1"
 TOOLS_CONTENT_VERSION = "village-tools-1"
 SEED_SAVING_CONTENT_VERSION = "village-seed-saving-1"
 SEED_TRADE_CONTENT_VERSION = "village-seed-trade-1"
-SEED_SAVING_CONTENT_VERSIONS = (SEED_SAVING_CONTENT_VERSION, SEED_TRADE_CONTENT_VERSION)
+HAMLET_CONTENT_VERSION = "village-hamlet-1"
+SEED_TRADE_CONTENT_VERSIONS = (SEED_TRADE_CONTENT_VERSION, HAMLET_CONTENT_VERSION)
+SEED_SAVING_CONTENT_VERSIONS = (SEED_SAVING_CONTENT_VERSION, *SEED_TRADE_CONTENT_VERSIONS)
 TOOLS_CONTENT_VERSIONS = (TOOLS_CONTENT_VERSION, *SEED_SAVING_CONTENT_VERSIONS)
 BLACKSMITH_CONTENT_VERSIONS = (BLACKSMITH_CONTENT_VERSION, *TOOLS_CONTENT_VERSIONS)
 SMELTING_CONTENT_VERSIONS = (SMELTING_CONTENT_VERSION, *BLACKSMITH_CONTENT_VERSIONS)
@@ -44,6 +46,7 @@ IRON_HOE = "iron_hoe"
 DEFAULT_STANDING_WOOD = 240
 DEFAULT_ORE_DEPOSIT = 120
 DEFAULT_SEED_RESERVE_TARGET = 4
+MAX_FARMHANDS = 40
 FARM_OWNER = "farm-owner"
 FARMSTEAD = "alderwick-farm"
 
@@ -93,7 +96,7 @@ class VillageConfig:
     seed_reserve_target: int = DEFAULT_SEED_RESERVE_TARGET
 
     def __post_init__(self) -> None:
-        integer("village.farmhands", self.farmhands, 1, 8)
+        integer("village.farmhands", self.farmhands, 1, MAX_FARMHANDS)
         for name in ("starting_seed", "starting_pantry", "starting_owner_coin", "starting_hand_coin"):
             integer(f"village.{name}", getattr(self, name), 0, MAX_QUANTITY)
         for name in ("harvest_minutes", "purchase_minutes", "eat_minutes", "rest_minutes",
@@ -103,6 +106,21 @@ class VillageConfig:
             integer(f"village.{name}", getattr(self, name), 1, MAX_QUANTITY)
         integer("village.harvest_max", self.harvest_max, self.harvest_min, MAX_QUANTITY)
         integer("village.seed_reserve_target", self.seed_reserve_target, 0, MAX_QUANTITY)
+
+
+@dataclass(frozen=True, slots=True)
+class HamletConfig:
+    """Population and labor capacity used only by the hamlet scenario."""
+
+    farmhands: int = 24
+    hired_shifts_per_farm: int = 6
+
+    def __post_init__(self) -> None:
+        integer("hamlet.farmhands", self.farmhands, 1, MAX_FARMHANDS)
+        integer("hamlet.hired_shifts_per_farm", self.hired_shifts_per_farm, 1, MAX_FARMHANDS)
+
+
+DEFAULT_HAMLET = HamletConfig()
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +136,7 @@ class Config:
     village: VillageConfig = field(default_factory=VillageConfig)
     starting_standing_wood: int = DEFAULT_STANDING_WOOD
     starting_ore_deposit: int = DEFAULT_ORE_DEPOSIT
+    hamlet: HamletConfig = field(default_factory=HamletConfig)
 
     def __post_init__(self) -> None:
         integer("minutes_per_day", self.minutes_per_day, 1, 100_000)
@@ -131,12 +150,16 @@ class Config:
         integer("starting_ore_deposit", self.starting_ore_deposit, 0, MAX_QUANTITY)
         if not isinstance(self.village, VillageConfig):
             raise WorldError("village settings must be a VillageConfig")
+        if not isinstance(self.hamlet, HamletConfig):
+            raise WorldError("hamlet settings must be a HamletConfig")
 
     @classmethod
     def from_mapping(cls, values: object) -> Self:
         options = config_fields(cls, values).copy()
         if "village" in options:
             options["village"] = VillageConfig(**config_fields(VillageConfig, options["village"]))
+        if "hamlet" in options:
+            options["hamlet"] = HamletConfig(**config_fields(HamletConfig, options["hamlet"]))
         return cls(**options)
 
 
@@ -343,6 +366,8 @@ class World:
         if (self.content_version not in SEED_SAVING_CONTENT_VERSIONS
                 and self.config.village.seed_reserve_target == DEFAULT_SEED_RESERVE_TARGET):
             del data["config"]["village"]["seed_reserve_target"]
+        if self.content_version != HAMLET_CONTENT_VERSION and self.config.hamlet == DEFAULT_HAMLET:
+            del data["config"]["hamlet"]
         if self.content_version not in MARKET_CONTENT_VERSIONS:
             for actor in data["actors"].values():
                 del actor["can_work"]

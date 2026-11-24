@@ -14,6 +14,16 @@ python -m venv .venv
 
 On macOS and Linux, use `.venv/bin/python`. To run directly from the source tree without installing packages, set `PYTHONPATH=src` in your shell (`$env:PYTHONPATH = "src"` in PowerShell), then use `python -m living_world`.
 
+## Run a 31-person hamlet
+
+The `hamlet` scenario runs the full seed-trade village with 24 farmhands instead of two. Each farm can pay up to six hired harvest shifts at once.
+
+```powershell
+.\.venv\Scripts\living-world.exe scenario hamlet --seed 8 --days 7 --json
+```
+
+Check `village.needs` for hunger, and `village.harvests` and `village.purchases` for activity. `village.coin_supply` stays at 222. To change the population or shift count, pass a configuration file such as `{"hamlet":{"farmhands":32,"hired_shifts_per_farm":8}}` with `--config`.
+
 ## Compare a week with and without saving seed
 
 1. In PowerShell, from the project folder, create two configuration files. Both give each farm one seed to start. The first sets a target of four seeds per farm. The second sets the target to zero and disables seed saving.

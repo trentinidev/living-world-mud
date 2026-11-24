@@ -22,6 +22,7 @@ Read [Progress](docs/PROGRESS.md), [Roadmap](docs/ROADMAP.md), and the relevant 
 - In the blacksmith scenario the smelter delivers iron to a stall, an iron purchase pays the smelter, and a forging job consumes reserved iron on completion.
 - A farm holds at most one installed hoe. The active harvest reserves it, completion applies the bonus and one use of wear, and the last use removes the hoe from inventory.
 - In `seed-saving`, harvest completion spends the planted seed and divides the crop between edible grain and planting seed in the same transaction. Keep these outputs separate in the journal and summary. Set `seed_reserve_target` to zero in a matched control.
+- The `hamlet` scenario reuses the seed-trade rules with a larger population and allows `hamlet.hired_shifts_per_farm` concurrent hired harvests per farm. Other scenarios keep one hired shift per farm. Draw generated farmhand names only beyond the original eight so earlier digests stay fixed. Advance long hamlet runs in one-day steps to stay under `max_events_per_advance`.
 - Keep world rules independent of wall-clock time, disk, user interfaces, and networking. Use explicit ordering and stable seeds. Verify interrupted continuation as well as repeat-run determinism.
 - Keep saves out of source control. Change rules, content, or schema versions deliberately when changing save or replay semantics.
 - Implement the smallest useful slice and run the existing tests before advancing a phase. Preserve real adverse outcomes, such as running out of seed, and record observed results and limitations.

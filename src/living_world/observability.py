@@ -10,7 +10,7 @@ from . import blacksmith, forestry, kiln, market, mining, routes, smelting
 from .model import (
     BLACKSMITH_CONTENT_VERSIONS, CHARCOAL, COIN, FARMSTEAD, FIREWOOD, FORESTRY_CONTENT_VERSIONS,
     GRAIN, IRON, IRON_HOE, IRON_ORE, KILN_CONTENT_VERSIONS, MINING_CONTENT_VERSIONS, ORE_IN_VEIN,
-    SEED_GRAIN, SEED_SAVING_CONTENT_VERSIONS, SEED_TRADE_CONTENT_VERSION, SMELTING_CONTENT_VERSIONS, SPATIAL_CONTENT_VERSIONS,
+    SEED_GRAIN, SEED_SAVING_CONTENT_VERSIONS, SEED_TRADE_CONTENT_VERSIONS, SMELTING_CONTENT_VERSIONS, SPATIAL_CONTENT_VERSIONS,
     STANDING_WOOD, TOOLS_CONTENT_VERSIONS, CharcoalDelivery, CharcoalIntent, FirewoodDelivery, ForgeIntent,
     HoeDelivery, IronDelivery, OreDelivery, SmeltingIntent, Travel, World,
 )
@@ -321,7 +321,7 @@ def village_metrics(
                 "food_grain_harvested": grain_produced,
                 "total_grain_harvested": grain_produced + seeds_saved,
             }
-        if world.content_version == SEED_TRADE_CONTENT_VERSION:
+        if world.content_version in SEED_TRADE_CONTENT_VERSIONS:
             metrics["seed_trade"] = {
                 "seeds_purchased": counts["buy_seed_completed"],
                 "coins_paid_for_seed": seed_purchase_coins,
