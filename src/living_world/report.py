@@ -6,12 +6,14 @@ Wall-clock runtime is measured for the report only. It never feeds back into the
 from __future__ import annotations
 
 import time
+from collections import Counter
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from .market import MarketShock
 from .model import Config, WorldError
 from .persistence import Save
+from .simulation import Simulation
 
 RECENT_DAYS = 7
 MAX_CAPPED_HUNGER_SHARE = 0.1
@@ -19,28 +21,45 @@ COUNTERS = ("harvests", "purchases", "grain_produced", "grain_eaten", "coin_paid
             "coin_paid_for_food", "failed_actions", "rests", "waits")
 
 
-def snapshot(save: Save) -> dict[str, object]:
-    village = save.summary()["village"]
-    settings_cap = 3 * save.inspect()["snapshot"]["config"]["village"]["meal_relief"]
+def snapshot(save: Save, settings_cap: int) -> dict[str, object]:
+    summary = save.summary()
+    village = summary["village"]
     hunger = [need["hunger"] for need in village["needs"].values()]
+    goods: Counter[str] = Counter()
+    for inventory in summary["inventory"].values():
+        goods.update(inventory)
     result: dict[str, object] = {key: village[key] for key in COUNTERS}
     result.update(
         population=len(hunger),
+        available_farmhands=village["market"]["available_farmhands"],
         coin_supply=village["coin_supply"],
         grain_in_stock=village["grain_in_stock"],
         mean_hunger=round(sum(hunger) / len(hunger), 1),
         max_hunger=max(hunger),
         capped_hunger=sum(value >= settings_cap for value in hunger),
+        stock_by_good=dict(goods),
+        market=village["market"],
     )
+    for section in ("forestry", "charcoal", "mining", "smelting", "blacksmith", "tools", "seed_saving",
+                    "seed_trade", "employment"):
+        if section in village:
+            result[section] = village[section]
     if "seed_saving" in village:
         result["seed_by_farm"] = village["seed_saving"]["seed_by_farm"]
     return result
 
 
 def advance_days(save: Save, days: int) -> None:
-    # One day per transaction keeps large villages under max_events_per_advance.
-    for _ in range(days):
-        save.advance(days=1)
+    if days == 0:
+        return
+
+    def advance(sim: Simulation) -> None:
+        minutes = sim.world.config.minutes_per_day
+        for _ in range(days):
+            sim.advance_to(sim.world.minute + minutes)
+
+    # Keep the per-day event budget while writing the checkpoint only once.
+    save.mutate(advance)
 
 
 def run_seed(directory: Path, scenario: str, seed: int, config: Config, horizons: list[int],
@@ -59,15 +78,23 @@ def run_seed(directory: Path, scenario: str, seed: int, config: Config, horizons
             save.market_shock(shock)
         advance_days(save, day - done)
         done = day
-        snapshots[day] = snapshot(save)
+        snapshots[day] = snapshot(save, 3 * config.village.meal_relief)
     end = snapshots[final]
     start = snapshots.get(final - RECENT_DAYS, {key: 0 for key in COUNTERS})
     recent = {key: end[key] - start[key] for key in ("harvests", "purchases", "grain_eaten")}
+    audit_error = None
+    try:
+        save.audit_inventory()
+    except WorldError as error:
+        audit_error = str(error)
     checks = {
+        "journal_balanced": audit_error is None,
         "coin_conserved": all(snap["coin_supply"] == initial_coin for snap in snapshots.values()),
+        "no_failed_actions": end["failed_actions"] == 0,
         "recent_production": recent["harvests"] > 0,
         "recent_trade": recent["purchases"] > 0,
         "recent_consumption": recent["grain_eaten"] > 0,
+        "food_in_stock": end["grain_in_stock"] > 0,
         "hunger_within_bounds": end["capped_hunger"] <= MAX_CAPPED_HUNGER_SHARE * end["population"],
     }
     return {
@@ -75,6 +102,7 @@ def run_seed(directory: Path, scenario: str, seed: int, config: Config, horizons
         "horizons": {str(day): snapshots[day] for day in horizons},
         f"last_{RECENT_DAYS}_days": recent,
         "checks": checks,
+        "audit_error": audit_error,
         "functional": all(checks.values()),
         "runtime_seconds": round(time.perf_counter() - started, 2),
     }
@@ -98,10 +126,13 @@ def viability_report(scenario: str, seeds: list[int], horizons: list[int], confi
         "shock": shock,
         "horizons": horizons,
         "criteria": {
+            "journal_balanced": "replaying the causal journal yields the saved stocks and accounts",
             "coin_conserved": "coin supply equals the initialized supply at every horizon",
+            "no_failed_actions": "no started action failed at completion",
             "recent_production": f"at least one harvest in the last {RECENT_DAYS} simulated days",
             "recent_trade": f"at least one food purchase in the last {RECENT_DAYS} simulated days",
             "recent_consumption": f"grain eaten in the last {RECENT_DAYS} simulated days",
+            "food_in_stock": "at least one unit of edible grain in the village at the final horizon",
             "hunger_within_bounds": f"at most {MAX_CAPPED_HUNGER_SHARE:.0%} of NPCs at the hunger cap",
         },
         "functional_seeds": functional,

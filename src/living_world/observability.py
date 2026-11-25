@@ -9,12 +9,12 @@ from dataclasses import asdict
 from . import blacksmith, forestry, kiln, market, mining, routes, smelting
 from .model import (
     BLACKSMITH_CONTENT_VERSIONS, CHARCOAL, COIN, FARMSTEAD, FIREWOOD, FORESTRY_CONTENT_VERSIONS,
-    GRAIN, IRON, IRON_HOE, IRON_ORE, KILN_CONTENT_VERSIONS, MINING_CONTENT_VERSIONS, ORE_IN_VEIN,
+    GRAIN, HAMLET_CONTENT_VERSION, IRON, IRON_HOE, IRON_ORE, KILN_CONTENT_VERSIONS, MINING_CONTENT_VERSIONS, ORE_IN_VEIN,
     SEED_GRAIN, SEED_SAVING_CONTENT_VERSIONS, SEED_TRADE_CONTENT_VERSIONS, SMELTING_CONTENT_VERSIONS, SPATIAL_CONTENT_VERSIONS,
     STANDING_WOOD, TOOLS_CONTENT_VERSIONS, CharcoalDelivery, CharcoalIntent, FirewoodDelivery, ForgeIntent,
     HoeDelivery, IronDelivery, OreDelivery, SmeltingIntent, Travel, World,
 )
-from .routes import BLACKSMITH, CHARCOAL_BURNER, FARMS, MINE_STOCK, MINER, SMELTER, WOODCUTTER
+from .routes import BLACKSMITH, CHARCOAL_BURNER, MINE_STOCK, MINER, SMELTER, WOODCUTTER
 from .village import hunger_at
 
 
@@ -25,9 +25,13 @@ def village_metrics(
     grain_produced = 0
     grain_eaten = 0
     wages = 0
+    forge_wages = 0
+    hired_forge_shifts = 0
+    craft_workers_in_fields: Counter[str] = Counter()
     sales = 0
-    harvests_by_farm = dict.fromkeys(FARMS, 0)
-    purchases_by_seller = dict.fromkeys(FARMS, 0)
+    farms = routes.fields_for(world)
+    harvests_by_farm = dict.fromkeys(farms, 0)
+    purchases_by_seller = dict.fromkeys(farms, 0)
     prices_paid: Counter[str] = Counter()
     trips_by_road: Counter[str] = Counter()
     grain_delivered = 0
@@ -66,6 +70,8 @@ def village_metrics(
         if "farm" in payload:
             if kind == "harvest_completed":
                 harvests_by_farm[payload["farm"]] += 1
+                if payload["actor"] not in farms and not payload["actor"].startswith("farmhand-"):
+                    craft_workers_in_fields[payload["actor"]] += 1
             elif kind == "buy_food_completed":
                 purchases_by_seller[payload["farm"]] += 1
                 prices_paid[str(payload["price"])] += 1
@@ -80,7 +86,7 @@ def village_metrics(
         if kind == "buy_firewood_completed":
             if payload["actor"] == CHARCOAL_BURNER:
                 firewood_for_kiln += 1
-            elif payload["actor"] in FARMS:
+            elif payload["actor"] in farms:
                 firewood_for_hearths += 1
         if kind == "install_hoe_completed":
             installed_by_farm[payload["actor"]] += 1
@@ -148,8 +154,11 @@ def village_metrics(
             elif kind == "forge_hoe_completed":
                 if good == IRON_HOE:
                     hoes_forged += quantity
-                else:
+                elif good == IRON:
                     forging_inputs[good] += quantity
+                elif good == COIN:
+                    forge_wages += quantity
+                    hired_forge_shifts += 1
     metrics: dict[str, object] = {
         "grain_produced": grain_produced,
         "grain_eaten": grain_eaten,
@@ -226,7 +235,7 @@ def village_metrics(
                 "hearths": {
                     farm: {"warm_until": world.actors[farm].warm_until,
                            "warm": world.actors[farm].warm_until > world.minute}
-                    for farm in FARMS
+                    for farm in farms
                 },
             }
         if world.content_version in KILN_CONTENT_VERSIONS:
@@ -310,13 +319,19 @@ def village_metrics(
                 "bonus_grain": bonus_grain,
                 "remaining_uses_by_farm": world.hoe_uses.copy(),
             }
+        if world.content_version == HAMLET_CONTENT_VERSION:
+            metrics["employment"] = {
+                "hired_forge_shifts": hired_forge_shifts,
+                "coin_paid_in_forge_wages": forge_wages,
+                "craft_workers_field_shifts": dict(sorted(craft_workers_in_fields.items())),
+            }
         if world.content_version in SEED_SAVING_CONTENT_VERSIONS:
             metrics["seed_saving"] = {
                 "reserve_target": world.config.village.seed_reserve_target,
                 "seeds_planted": seeds_planted,
                 "seeds_saved": seeds_saved,
                 "seed_by_farm": {
-                    farm: world.inventory[routes.pantry(farm)][SEED_GRAIN] for farm in FARMS
+                    farm: world.inventory[routes.pantry(farm)][SEED_GRAIN] for farm in farms
                 },
                 "food_grain_harvested": grain_produced,
                 "total_grain_harvested": grain_produced + seeds_saved,
@@ -327,7 +342,7 @@ def village_metrics(
                 "coins_paid_for_seed": seed_purchase_coins,
                 "seeds_unloaded": counts["store_seed_completed"],
                 "seeds_carried_by_farm": {
-                    farm: world.inventory[farm].get(SEED_GRAIN, 0) for farm in FARMS
+                    farm: world.inventory[farm].get(SEED_GRAIN, 0) for farm in farms
                 },
             }
     return metrics

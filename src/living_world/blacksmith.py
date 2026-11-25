@@ -6,8 +6,9 @@ from collections.abc import Iterator
 
 from . import forestry, routes
 from .model import (
-    BLACKSMITH_CONTENT_VERSION, BLACKSMITH_CONTENT_VERSIONS, COIN, GRAIN, IRON, IRON_HOE,
-    TOOLS_CONTENT_VERSIONS, Actor, ForgeIntent, HoeDelivery, Movement, Travel, World, WorldError,
+    BLACKSMITH_CONTENT_VERSION, BLACKSMITH_CONTENT_VERSIONS, COIN, GRAIN, HAMLET_CONTENT_VERSION,
+    IRON, IRON_HOE, TOOLS_CONTENT_VERSIONS, Actor, ForgeIntent, HoeDelivery, Movement, Travel,
+    World, WorldError,
 )
 from .routes import BLACKSMITH, FORGE, MARKET_SQUARE, SMELTER, TOOL_STOCK
 
@@ -15,6 +16,17 @@ IRON_PRICE = 12
 FORGE_MINUTES = 140
 HOE_TARGET = 3
 STARTING_COIN = 42
+FORGE_INPUTS = "forge-inputs"
+
+
+def can_hire(world: World, available: forestry.Available) -> bool:
+    settings = world.config.village
+    return (
+        world.actors[BLACKSMITH].alive
+        and available(routes.stall(BLACKSMITH), IRON_HOE) < HOE_TARGET
+        and available(FORGE_INPUTS, IRON) > 0
+        and available(BLACKSMITH, COIN) >= settings.wage + settings.meal_price * 2
+    )
 
 
 def add_forge(world: World) -> None:
@@ -29,9 +41,18 @@ def validate(world: World, intent: ForgeIntent) -> None:
     if world.content_version not in BLACKSMITH_CONTENT_VERSIONS:
         raise WorldError("iron purchases and forging require a save with a blacksmith")
     actor = world.actors[intent.actor]
+    if intent.kind == "store_forge_iron":
+        if (world.content_version != HAMLET_CONTENT_VERSION or intent.actor != BLACKSMITH
+                or actor.location != FORGE or intent.duration != 1 or intent.price is not None):
+            raise WorldError("only the blacksmith can unload iron at the hamlet forge")
+        return
     if intent.kind == "forge_hoe":
-        if intent.actor != BLACKSMITH or actor.location != FORGE or not actor.can_work:
-            raise WorldError("only the blacksmith can make a hoe at the forge")
+        hired = (world.content_version == HAMLET_CONTENT_VERSION
+                 and intent.actor.startswith("farmhand-") and world.actors[BLACKSMITH].alive)
+        if (intent.actor != BLACKSMITH and not hired) or actor.location != FORGE or not actor.can_work:
+            if world.content_version != HAMLET_CONTENT_VERSION:
+                raise WorldError("only the blacksmith can make a hoe at the forge")
+            raise WorldError("making a hoe requires an eligible worker at the forge")
         if intent.duration != FORGE_MINUTES or intent.price is not None:
             raise WorldError("making a hoe requires the forging duration")
         return
@@ -48,12 +69,18 @@ def validate(world: World, intent: ForgeIntent) -> None:
         raise WorldError("duration does not match the iron purchase rules")
 
 
-def movements(intent: ForgeIntent) -> tuple[Movement, ...]:
+def movements(world: World, intent: ForgeIntent) -> tuple[Movement, ...]:
+    if intent.kind == "store_forge_iron":
+        return (Movement(BLACKSMITH, FORGE_INPUTS, IRON, 1),)
     if intent.kind == "forge_hoe":
-        return (
-            Movement(intent.actor, None, IRON, 1),
+        source = FORGE_INPUTS if world.content_version == HAMLET_CONTENT_VERSION else intent.actor
+        output = (
+            Movement(source, None, IRON, 1),
             Movement(None, TOOL_STOCK, IRON_HOE, 1),
         )
+        if intent.actor != BLACKSMITH:
+            output += (Movement(BLACKSMITH, intent.actor, COIN, world.config.village.wage),)
+        return output
     return (
         Movement(routes.stall(SMELTER), intent.actor, IRON, 1),
         Movement(intent.actor, SMELTER, COIN, IRON_PRICE),
@@ -69,7 +96,8 @@ def to_market(world: World, available: forestry.Available) -> Travel:
     return Travel(BLACKSMITH, FORGE, MARKET_SQUARE, duration)
 
 
-def work(world: World, available: forestry.Available) -> Iterator[ForgeIntent | Travel]:
+def work(world: World, available: forestry.Available, *, hire_inbound: bool = False
+         ) -> Iterator[ForgeIntent | Travel]:
     actor = world.actors[BLACKSMITH]
     if not actor.can_work:
         return
@@ -85,12 +113,28 @@ def work(world: World, available: forestry.Available) -> Iterator[ForgeIntent | 
             return
     elif local_stock >= HOE_TARGET:
         return
-    if available(BLACKSMITH, IRON):
+    if world.content_version == HAMLET_CONTENT_VERSION:
+        if available(FORGE_INPUTS, IRON):
+            if hire_inbound and can_hire(world, available):
+                return
+            if actor.location == FORGE:
+                yield ForgeIntent("forge_hoe", BLACKSMITH, FORGE_MINUTES)
+            else:
+                yield routes.next_leg(world, BLACKSMITH, actor.location, FORGE)
+            return
+        if available(BLACKSMITH, IRON):
+            if actor.location == FORGE:
+                yield ForgeIntent("store_forge_iron", BLACKSMITH, 1)
+            else:
+                yield routes.next_leg(world, BLACKSMITH, actor.location, FORGE)
+            return
+    elif available(BLACKSMITH, IRON):
         if actor.location == FORGE:
             yield ForgeIntent("forge_hoe", BLACKSMITH, FORGE_MINUTES)
         else:
             yield routes.next_leg(world, BLACKSMITH, actor.location, FORGE)
-    elif (available(BLACKSMITH, COIN) >= IRON_PRICE and world.actors[SMELTER].alive
+        return
+    if (available(BLACKSMITH, COIN) >= IRON_PRICE and world.actors[SMELTER].alive
           and available(routes.stall(SMELTER), IRON)):
         if actor.location == MARKET_SQUARE:
             yield ForgeIntent("buy_iron", BLACKSMITH, world.config.village.purchase_minutes,

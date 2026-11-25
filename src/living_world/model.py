@@ -19,8 +19,9 @@ BLACKSMITH_CONTENT_VERSION = "village-blacksmith-1"
 TOOLS_CONTENT_VERSION = "village-tools-1"
 SEED_SAVING_CONTENT_VERSION = "village-seed-saving-1"
 SEED_TRADE_CONTENT_VERSION = "village-seed-trade-1"
-HAMLET_CONTENT_VERSION = "village-hamlet-1"
-SEED_TRADE_CONTENT_VERSIONS = (SEED_TRADE_CONTENT_VERSION, HAMLET_CONTENT_VERSION)
+HAMLET_CONTENT_VERSION = "village-hamlet-2"
+HAMLET_CONTENT_VERSIONS = ("village-hamlet-1", HAMLET_CONTENT_VERSION)
+SEED_TRADE_CONTENT_VERSIONS = (SEED_TRADE_CONTENT_VERSION, *HAMLET_CONTENT_VERSIONS)
 SEED_SAVING_CONTENT_VERSIONS = (SEED_SAVING_CONTENT_VERSION, *SEED_TRADE_CONTENT_VERSIONS)
 TOOLS_CONTENT_VERSIONS = (TOOLS_CONTENT_VERSION, *SEED_SAVING_CONTENT_VERSIONS)
 BLACKSMITH_CONTENT_VERSIONS = (BLACKSMITH_CONTENT_VERSION, *TOOLS_CONTENT_VERSIONS)
@@ -114,10 +115,12 @@ class HamletConfig:
 
     farmhands: int = 24
     hired_shifts_per_farm: int = 6
+    farms: int = 2
 
     def __post_init__(self) -> None:
         integer("hamlet.farmhands", self.farmhands, 1, MAX_FARMHANDS)
         integer("hamlet.hired_shifts_per_farm", self.hired_shifts_per_farm, 1, MAX_FARMHANDS)
+        integer("hamlet.farms", self.farms, 2, 6)
 
 
 DEFAULT_HAMLET = HamletConfig()
@@ -277,7 +280,7 @@ class SmeltingIntent:
 
 @dataclass(frozen=True, slots=True)
 class ForgeIntent:
-    kind: Literal["buy_iron", "forge_hoe"]
+    kind: Literal["buy_iron", "store_forge_iron", "forge_hoe"]
     actor: str
     duration: int
     price: int | None = None
@@ -366,8 +369,10 @@ class World:
         if (self.content_version not in SEED_SAVING_CONTENT_VERSIONS
                 and self.config.village.seed_reserve_target == DEFAULT_SEED_RESERVE_TARGET):
             del data["config"]["village"]["seed_reserve_target"]
-        if self.content_version != HAMLET_CONTENT_VERSION and self.config.hamlet == DEFAULT_HAMLET:
+        if self.content_version not in HAMLET_CONTENT_VERSIONS and self.config.hamlet == DEFAULT_HAMLET:
             del data["config"]["hamlet"]
+        elif self.content_version != HAMLET_CONTENT_VERSION and self.config.hamlet.farms == 2:
+            del data["config"]["hamlet"]["farms"]
         if self.content_version not in MARKET_CONTENT_VERSIONS:
             for actor in data["actors"].values():
                 del actor["can_work"]
@@ -414,7 +419,7 @@ class World:
                 intent = MiningIntent(**raw_intent)
             elif raw_intent.get("kind") in ("buy_iron_ore", "buy_charcoal", "smelt_iron"):
                 intent = SmeltingIntent(**raw_intent)
-            elif raw_intent.get("kind") in ("buy_iron", "forge_hoe"):
+            elif raw_intent.get("kind") in ("buy_iron", "store_forge_iron", "forge_hoe"):
                 intent = ForgeIntent(**raw_intent)
             elif raw_intent.get("kind") in ("buy_hoe", "install_hoe"):
                 intent = ToolIntent(**raw_intent)

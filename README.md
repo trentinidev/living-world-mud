@@ -22,7 +22,26 @@ The `hamlet` scenario runs the full seed-trade village with 24 farmhands instead
 .\.venv\Scripts\living-world.exe scenario hamlet --seed 8 --days 7 --json
 ```
 
-Check `village.needs` for hunger, and `village.harvests` and `village.purchases` for activity. `village.coin_supply` stays at 222. To change the population or shift count, pass a configuration file such as `{"hamlet":{"farmhands":32,"hired_shifts_per_farm":8}}` with `--config`.
+Check `village.needs` for hunger and `village.employment` for paid forge shifts and craft workers taking field jobs. The default village has 222 coins. To add farms and jobs, pass a JSON file such as `{"hamlet":{"farms":4,"farmhands":32,"hired_shifts_per_farm":8}}` with `--config`.
+
+## Export the Phase 1 viability report
+
+1. From the project folder, create the output folder and run the baseline. This starts ten independent villages and checks them on days 1, 7, 30 and 90. The report can take several minutes.
+
+   ```powershell
+   New-Item -ItemType Directory -Path saves -Force | Out-Null
+   .\.venv\Scripts\living-world.exe report hamlet --seeds 0-9 --days '1,7,30,90' --json |
+       Set-Content -Encoding ascii saves/hamlet-phase1-baseline.json
+   ```
+
+2. Read the number of functional villages. Each run checks the last week's production, food purchases and meals, the final grain stock, hunger, failed actions and the ledger. The Phase 1 target is at least nine of ten functional villages at day 90.
+
+   ```powershell
+   Get-Content -Raw saves/hamlet-phase1-baseline.json |
+       ConvertFrom-Json | Select-Object functional_seeds, seed_count, runtime_seconds
+   ```
+
+3. To reproduce a shorter disruption, use `report hamlet --seeds 0,8,9 --days 1,7` with `--shock seed-shortage` or `--shock worker-loss`. For a village that starts with an empty deposit or woodland, use `--config` with a JSON file containing `{"starting_ore_deposit":0}` or `{"starting_standing_wood":0}`.
 
 ## Compare a week with and without saving seed
 

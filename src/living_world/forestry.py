@@ -52,7 +52,7 @@ def validate(world: World, intent: FirewoodIntent) -> None:
         if intent.duration != world.config.village.purchase_minutes:
             raise WorldError("duration does not match the firewood purchase rules")
     elif intent.kind == "burn_firewood":
-        if actor.location != routes.FIELDS.get(intent.actor):
+        if actor.location != routes.fields_for(world).get(intent.actor):
             raise WorldError("heating requires the farm owner to be at their own hearth")
         if actor.warm_until > world.minute:
             raise WorldError("the hearth is still warm")
@@ -105,7 +105,7 @@ def work(world: World, available: Available) -> Iterator[FirewoodIntent | Travel
 def hearth(
     world: World, actor_id: str, available: Available, delivery_grain: int,
 ) -> Iterator[FirewoodIntent | Travel]:
-    home = routes.FIELDS.get(actor_id)
+    home = routes.fields_for(world).get(actor_id)
     actor = world.actors[actor_id]
     if home is None or actor.fatigue == 0 or actor.warm_until > world.minute:
         return

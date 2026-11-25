@@ -9,8 +9,9 @@ from random import Random
 
 from . import blacksmith, farm_tools, forestry, kiln, market, mining, routes, seed_trade, smelting, village
 from .model import (
-    COIN, FARM_OWNER, GRAIN, MARKET_CONTENT_VERSION, MARKET_CONTENT_VERSIONS, MAX_CLOCK, MAX_QUANTITY,
-    SEED_GRAIN, SEED_SAVING_CONTENT_VERSION, SEED_TRADE_CONTENT_VERSION, HAMLET_CONTENT_VERSION, SPATIAL_CONTENT_VERSIONS, VILLAGE_CONTENT_VERSIONS,
+    COIN, FARM_OWNER, GRAIN, IRON, MARKET_CONTENT_VERSION, MARKET_CONTENT_VERSIONS, MAX_CLOCK, MAX_QUANTITY,
+    HAMLET_CONTENT_VERSION, HAMLET_CONTENT_VERSIONS, SEED_GRAIN, SEED_SAVING_CONTENT_VERSION,
+    SEED_TRADE_CONTENT_VERSION, SPATIAL_CONTENT_VERSIONS, VILLAGE_CONTENT_VERSIONS,
     Action, Actor, CharcoalIntent,
     Config, Event, FirewoodIntent, ForgeIntent, HoeHarvest, Intent, MarketIntent, MiningIntent,
     Movement, Scheduled, SeedIntent, SmeltingIntent, ToolIntent, Transfer, Travel, VillageIntent,
@@ -78,6 +79,8 @@ class Simulation:
                 world.content_version = SEED_TRADE_CONTENT_VERSION if with_seed_trade else SEED_SAVING_CONTENT_VERSION
                 if hamlet:
                     world.content_version = HAMLET_CONTENT_VERSION
+                    world.inventory[blacksmith.FORGE_INPUTS] = {IRON: 0}
+                    routes.add_hamlet_farms(world)
         else:
             raise WorldError(f"unknown scenario {scenario!r}")
         sim = cls(world)
@@ -128,7 +131,7 @@ class Simulation:
         if isinstance(intent, SmeltingIntent):
             return smelting.movements(intent)
         if isinstance(intent, ForgeIntent):
-            return blacksmith.movements(intent)
+            return blacksmith.movements(self.world, intent)
         if isinstance(intent, ToolIntent):
             return farm_tools.movements(intent)
         if isinstance(intent, SeedIntent):
@@ -160,6 +163,9 @@ class Simulation:
             raise WorldError(f"actor {intent.actor!r} is already busy")
         if isinstance(intent, MarketIntent):
             self.validate_market_start(intent)
+        if (self.world.content_version == HAMLET_CONTENT_VERSION
+                and isinstance(intent, ForgeIntent) and intent.kind == "forge_hoe" and not self.forge_open()):
+            raise WorldError("the forge shift is occupied")
         if isinstance(intent, SeedIntent) and intent.kind == "buy_seed":
             assert intent.seller is not None
             if not seed_trade.has_surplus(self.world, intent.seller, self.available):
@@ -251,12 +257,23 @@ class Simulation:
 
     def hired_shift_open(self, farm: str) -> bool:
         shifts = (self.world.config.hamlet.hired_shifts_per_farm
-                  if self.world.content_version == HAMLET_CONTENT_VERSION else 1)
+                  if self.world.content_version in HAMLET_CONTENT_VERSIONS else 1)
         return sum(
             isinstance(action.intent, MarketIntent) and action.intent.kind == "harvest"
             and action.intent.farm == farm and action.intent.actor != farm
             for action in self.active.values()
         ) < shifts
+
+    def forge_open(self) -> bool:
+        return not any(isinstance(action.intent, ForgeIntent) and action.intent.kind == "forge_hoe"
+                       for action in self.active.values())
+
+    def forge_hire_inbound(self) -> bool:
+        return any(
+            worker.startswith("farmhand-") and isinstance(action.intent, Travel)
+            and action.intent.destination == routes.FORGE
+            for worker, action in self.active.items()
+        )
 
     def hoe_is_free(self, farm: str) -> bool:
         return not any(isinstance(action.intent, HoeHarvest) and action.intent.farm == farm
@@ -376,7 +393,9 @@ class Simulation:
             self.world.actors[worker] = replace(actor, can_work=False)
             cause = self.record("worker_sidelined", {"actor": worker})
             shift = self.active.get(worker)
-            if shift and isinstance(shift.intent, MarketIntent) and shift.intent.kind == "harvest":
+            if shift and isinstance(shift.intent, (MarketIntent, ForgeIntent)) and shift.intent.kind in (
+                "harvest", "forge_hoe",
+            ):
                 key = next(key for key, action in self.world.actions.items() if action is shift)
                 self.cancel(key, cause_id=cause)
         else:
@@ -389,8 +408,11 @@ class Simulation:
         settings = self.world.config.village
         rejected: dict[str, str] = {}
         if self.world.content_version in SPATIAL_CONTENT_VERSIONS:
+            forge_jobs = self.world.content_version == HAMLET_CONTENT_VERSION
             options = market.route_choices(
                 self.world, actor, self.available, self.hired_shift_open, self.hoe_is_free,
+                forge_open=forge_jobs and self.forge_open(),
+                forge_hire_inbound=forge_jobs and self.forge_hire_inbound(),
             )
         elif self.world.content_version == MARKET_CONTENT_VERSION:
             options = market.choices(self.world, actor, self.available)

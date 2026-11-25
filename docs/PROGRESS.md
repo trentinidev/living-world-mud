@@ -1,5 +1,33 @@
 # Progress
 
+## Thirteenth checkpoint — hamlet employment, additional farms, and disruption tests
+
+The `hamlet` now gives farmhands access to paid forge shifts. The blacksmith moves purchased iron into the forge before a shift can reserve it. A hired shift also reserves the wage. The worker earns it when the hoe is finished. Craft workers can take field shifts when their usual work is unavailable and they need income. The default village still has 31 residents and eight locations. Increasing `hamlet.farms` to four produced a village with 33 residents and ten locations. All four farms harvested and sold grain in the seven-day run.
+
+All 92 tests passed. They cover the last item at the stall, insufficient funds, the forge's single shift, worker loss during a forge shift, and checking saved balances against the journal. A save from `village-hamlet-1` resumed under the new code with the same digest as it did under the original code.
+
+The seven-day experiments used seeds 0, 8 and 9, with a control and four disruptions per seed. All 15 runs reconciled their journals, preserved 222 coins, and recorded zero failed completions.
+
+| Disruption | Observed result |
+| --- | --- |
+| East farm seed shortage on day one | The east farm bought a seed and returned to a four-seed reserve in all three runs. In seed 8 the two-coin food purchases rose from 208 to 222. |
+| One farmhand unable to work after day one | The active farmhand pool fell from 24 to 23. Total grain eaten fell from 620 to 604–607. In seed 0 the smelter took a field shift. |
+| Empty ore deposit | No ore was extracted and no iron or hoes were produced. The miner completed 11–14 paid field shifts. |
+| Empty woodland | No wood, charcoal, iron, or hoes were produced. The woodcutter completed 13–14 paid field shifts. |
+| Two buyers for the last grain at a stall | A focused test confirmed one successful payment and delivery. The second order left the journal and balances unchanged. |
+
+### Phase 1 acceptance
+
+The installed Windows CLI ran `report hamlet --seeds 0-9 --days 1,7,30,90 --json` in 189.01 seconds. All ten seeds met the day-90 criteria, above the required nine. Every ledger reconciled, every village retained its 222 coins, and no action failed at completion.
+
+At day 90, each village had 31 NPCs and zero at the hunger cap. During days 84–90, each completed 388–414 harvests and 609 food purchases and ate 650–651 grain. The villages finished with 2,641–3,307 edible grain in stock. The report includes population, hunger, paid work, production, consumption, market activity, stock by good and runtime at the recorded checkpoints.
+
+Phase 1 is complete. The next phase begins with player character creation and text commands through the same action rules used by NPCs.
+
+## Twelfth checkpoint — 31-resident hamlet and viability report
+
+The `hamlet` added 24 farmhands, six hired shift slots per farm, and an alternative paid job for the woodcutter when wood or buyers ran out. It retained the eight locations and the full food-to-tool chain. The `report` command was added for repeatable multi-seed runs at 1, 7, 30 and 90 days. The existing suite contained 88 passing tests at this checkpoint.
+
 ## Eleventh checkpoint — paid seed purchases between farms
 
 In the `seed-trade` scenario, a farm owner with an empty seed pantry can travel to a neighboring farm that has unreserved seed above its reserve target. The accepted purchase reserves one seed and two coins. On completion the buyer pays the seller and carries the seed back through the market. A separate action unloads it at home before it can be planted.

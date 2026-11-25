@@ -3,9 +3,10 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 
-from living_world.model import COIN, FARM_OWNER, GRAIN, Config, MarketIntent, WorldError
+from living_world.blacksmith import FORGE_INPUTS, FORGE_MINUTES
+from living_world.model import COIN, FARM_OWNER, GRAIN, IRON, IRON_HOE, Config, ForgeIntent, MarketIntent, WorldError
 from living_world.persistence import Save
-from living_world.routes import FIELDS, MARKET_SQUARE, WEST_FARM, stall
+from living_world.routes import BLACKSMITH, FIELDS, FORGE, MARKET_SQUARE, TOOL_STOCK, WEST_FARM, stall
 
 
 class HamletTests(unittest.TestCase):
@@ -33,6 +34,22 @@ class HamletTests(unittest.TestCase):
             Config.from_mapping({"hamlet": {"crews": 2}})
         with self.assertRaisesRegex(WorldError, "hamlet.hired_shifts_per_farm"):
             Config.from_mapping({"hamlet": {"hired_shifts_per_farm": 0}})
+        with self.assertRaisesRegex(WorldError, "hamlet.farms"):
+            Config.from_mapping({"hamlet": {"farms": 7}})
+
+    def test_additional_farms_publish_real_grain_and_reconcile_in_the_journal(self):
+        config = Config.from_mapping({"hamlet": {"farms": 4}})
+        save = self.create("four-farms", config)
+        save.advance(days=7)
+        summary = save.summary()
+        village = summary["village"]
+        self.assertEqual(summary["actors"], 33)
+        self.assertEqual(village["coin_supply"], 258)
+        self.assertEqual(len(village["travel"]["roads_to_market"]) + 1, 10)
+        for farm in ("north-farm-owner", "south-farm-owner"):
+            self.assertGreater(village["market"]["harvests_by_farm"][farm], 0)
+            self.assertGreater(village["market"]["purchases_by_seller"][farm], 0)
+        save.audit_inventory()
 
     def test_farm_hires_up_to_its_shift_limit_and_reopens_after_cancellation(self):
         config = Config.from_mapping({"hamlet": {"farmhands": 4, "hired_shifts_per_farm": 3}})
@@ -107,6 +124,46 @@ class HamletTests(unittest.TestCase):
         self.assertEqual(village["failed_actions"], 0)
         self.assertGreater(village["harvests"], 0)
         self.assertGreater(village["purchases"], 0)
+
+    def test_forge_hires_only_when_it_can_reserve_wages_and_iron(self):
+        save = self.create("forge")
+        wage = Config().village.wage
+        action = ForgeIntent("forge_hoe", "farmhand-1", FORGE_MINUTES)
+        with self.assertRaisesRegex(WorldError, "eligible worker at the forge"):
+            save.submit("remote", action)
+
+        def stage(sim):
+            world = sim.world
+            world.queue.clear()
+            for actor in ("farmhand-1", "farmhand-2"):
+                world.actors[actor] = replace(world.actors[actor], location=FORGE)
+            world.inventory[FORGE_INPUTS][IRON] = 2
+            world.inventory[BLACKSMITH][COIN] = wage - 1
+
+        save.mutate(stage)
+        with self.assertRaisesRegex(WorldError, "insufficient available coin"):
+            save.submit("unfunded", action)
+        save.mutate(lambda sim: sim.world.inventory[BLACKSMITH].update({COIN: wage}))
+        save.submit("first", action)
+        with self.assertRaisesRegex(WorldError, "forge shift is occupied"):
+            save.submit("second", replace(action, actor="farmhand-2"))
+        save.market_shock("worker-loss")
+        save.submit("second", replace(action, actor="farmhand-2"))
+        Save(save.path).advance(minutes=FORGE_MINUTES)
+        report = save.summary()
+        self.assertEqual(report["inventory"][FORGE_INPUTS][IRON], 1)
+        self.assertEqual(report["inventory"][TOOL_STOCK][IRON_HOE], 1)
+        self.assertEqual(report["inventory"][BLACKSMITH][COIN], 0)
+        self.assertEqual(report["inventory"]["farmhand-2"][COIN], Config().village.starting_hand_coin + wage)
+        self.assertEqual(report["village"]["employment"]["coin_paid_in_forge_wages"], wage)
+
+    def test_farmhands_take_forge_shifts_and_craft_workers_take_field_shifts(self):
+        save = self.create("switch")
+        save.advance(days=7)
+        village = save.summary()["village"]
+        self.assertGreater(village["employment"]["hired_forge_shifts"], 0)
+        self.assertGreater(village["employment"]["craft_workers_field_shifts"][BLACKSMITH], 0)
+        self.assertEqual(village["coin_supply"], 222)
 
 
 if __name__ == "__main__":

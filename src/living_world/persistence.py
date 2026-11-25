@@ -12,7 +12,7 @@ from typing import TypeVar
 
 from . import market
 from .model import (
-    MARKET_CONTENT_VERSIONS, MAX_CLOCK, VILLAGE_CONTENT_VERSIONS, Action, Config, Intent, World, WorldError,
+    COIN, MARKET_CONTENT_VERSIONS, MAX_CLOCK, VILLAGE_CONTENT_VERSIONS, Action, Config, Intent, World, WorldError,
     canonical_json, integer,
 )
 from .observability import village_metrics
@@ -170,3 +170,40 @@ class Save:
                     available = Simulation(state).available
                 summary["village"] = village_metrics(state, events, available)
             return summary
+
+    def audit_inventory(self) -> None:
+        """Rebuild balances from the journal and raise on the first discrepancy."""
+        with self.connect(readonly=True) as db, db:
+            db.execute("BEGIN")
+            state = self.load_world(db)
+            events = db.execute("SELECT id, minute, kind, payload, cause_id FROM journal ORDER BY id")
+            first = events.fetchone()
+            if first is None or (first[0], first[1], first[2], first[4]) != (1, 0, "world_initialized", None):
+                raise WorldError("journal is missing its initialization event")
+            stock = json.loads(first[3])["inventory"]
+            if any(quantity < 0 for account in stock.values() for quantity in account.values()):
+                raise WorldError("journal initialization contains negative stock")
+            last_id, last_minute = 1, 0
+            for event_id, minute, _, payload, cause_id in events:
+                if (event_id != last_id + 1 or not last_minute <= minute <= state.minute
+                        or (cause_id is not None and not 1 <= cause_id <= last_id)):
+                    raise WorldError(f"journal event {event_id} has an invalid order or cause")
+                last_id, last_minute = event_id, minute
+                for move in json.loads(payload).get("movements", ()):
+                    source, destination = move["source"], move["destination"]
+                    good, quantity = move["good"], move["quantity"]
+                    if (type(quantity) is not int or quantity <= 0
+                            or (source is None and destination is None)
+                            or (good == COIN and (source is None or destination is None))):
+                        raise WorldError(f"journal event {event_id} has an invalid movement")
+                    if source is not None:
+                        if source not in stock or stock[source].get(good, 0) < quantity:
+                            raise WorldError(f"journal event {event_id} overdraws {good} from {source}")
+                        stock[source][good] -= quantity
+                    if destination is not None:
+                        if destination not in stock:
+                            raise WorldError(f"journal event {event_id} has an unknown destination")
+                        target = stock[destination]
+                        target[good] = target.get(good, 0) + quantity
+            if last_id != state.next_event_id - 1 or state.inventory != stock:
+                raise WorldError("journal inventory does not match the saved state")

@@ -6,9 +6,10 @@ from dataclasses import replace
 
 from .model import (
     BLACKSMITH_CONTENT_VERSIONS, CHARCOAL, CHARCOAL_CONTENT_VERSION, FARM_OWNER, FIREWOOD,
-    FORESTRY_CONTENT_VERSIONS, GRAIN, IRON, IRON_HOE, IRON_ORE, MAX_QUANTITY, MINING_CONTENT_VERSIONS,
+    FORESTRY_CONTENT_VERSIONS, GRAIN, HAMLET_CONTENT_VERSION, IRON, IRON_HOE, IRON_ORE, MAX_QUANTITY,
+    MINING_CONTENT_VERSIONS,
     ROUTES_CONTENT_VERSION, SEED_GRAIN, SMELTING_CONTENT_VERSIONS, SPATIAL_CONTENT_VERSIONS,
-    TOOLS_CONTENT_VERSIONS, CharcoalDelivery, FirewoodDelivery, HoeDelivery, IronDelivery, Movement,
+    TOOLS_CONTENT_VERSIONS, Actor, CharcoalDelivery, FirewoodDelivery, HoeDelivery, IronDelivery, Movement,
     OreDelivery, Travel, World, WorldError, integer,
 )
 
@@ -37,6 +38,34 @@ BLACKSMITH = "blacksmith"
 FORGE = "forge"
 TOOL_STOCK = "forge-stock"
 FORGE_ROADS = SMELTERY_ROADS | {FORGE: 15}
+HAMLET_FARM_SITES = (
+    ("north-farm-owner", "Edda", "north-farm", 25),
+    ("south-farm-owner", "Leif", "south-farm", 30),
+    ("hill-farm-owner", "Hilda", "hill-farm", 40),
+    ("river-farm-owner", "Runa", "river-farm", 35),
+)
+
+
+def extra_farm_sites(world: World) -> tuple[tuple[str, str, str, int], ...]:
+    if world.content_version != HAMLET_CONTENT_VERSION:
+        return ()
+    return HAMLET_FARM_SITES[:world.config.hamlet.farms - len(FARMS)]
+
+
+def fields_for(world: World) -> dict[str, str]:
+    extra = extra_farm_sites(world)
+    return FIELDS | {owner: field for owner, _, field, _ in extra} if extra else FIELDS
+
+
+def add_hamlet_farms(world: World) -> None:
+    for owner, name, field, minutes in extra_farm_sites(world):
+        if minutes > world.config.max_action_minutes:
+            raise WorldError("a road is longer than max_action_minutes")
+        world.actors[owner] = Actor(name, field)
+        world.inventory[owner] = world.inventory[FARM_OWNER].copy()
+        world.inventory[pantry(owner)] = world.inventory[pantry(FARM_OWNER)].copy()
+        world.inventory[stall(owner)] = world.inventory[stall(FARM_OWNER)].copy()
+        world.hoe_uses[owner] = 0
 
 
 def pantry(farm: str) -> str:
@@ -62,7 +91,8 @@ def separate_sites(world: World) -> None:
 
 def roads_for(world: World) -> dict[str, int]:
     if world.content_version in BLACKSMITH_CONTENT_VERSIONS:
-        return FORGE_ROADS
+        extra = extra_farm_sites(world)
+        return FORGE_ROADS | {field: minutes for _, _, field, minutes in extra} if extra else FORGE_ROADS
     if world.content_version in SMELTING_CONTENT_VERSIONS:
         return SMELTERY_ROADS
     if world.content_version in MINING_CONTENT_VERSIONS:
@@ -103,7 +133,7 @@ def validate_travel(world: World, intent: Travel) -> None:
     if intent.duration != roads[field]:
         raise WorldError(f"this road takes {roads[field]} simulated minutes")
     integer("travel grain", intent.grain, 0, MAX_QUANTITY)
-    if intent.grain and (FIELDS.get(intent.actor) != intent.source or intent.destination != MARKET_SQUARE):
+    if intent.grain and (fields_for(world).get(intent.actor) != intent.source or intent.destination != MARKET_SQUARE):
         raise WorldError("farmers can only deliver grain from their own pantry to their market stall")
     if isinstance(intent, FirewoodDelivery):
         if (world.content_version not in FORESTRY_CONTENT_VERSIONS or intent.actor != WOODCUTTER

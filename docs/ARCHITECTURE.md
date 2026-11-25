@@ -78,4 +78,12 @@ In `seed-saving`, harvest completion spends one planting seed, adds any hoe bonu
 
 In `seed-trade`, a farm owner can buy one seed at a neighbor's field for two coins. The sale uses surplus after existing reservations and leaves at least the seller's reserve target or one seed when the target is zero. The buyer carries the seed home and unloads it into the pantry. Seed travels in personal inventory and is available for planting after unloading.
 
+## Hamlet population and employment
+
+The hamlet starts with 31 residents and eight locations. The configuration accepts two to six farms. Additional farm sites use the same pantry, stall, travel, seed-trade and hiring rules. Each farm starts with its own seed, food and coins. The road table is derived from the configured farm sites and a fixed list of industrial sites.
+
+Craft workers can fall back to funded farm shifts when their usual work stalls and they need income. At the hamlet forge, the blacksmith buys iron and unloads it into workshop stock. A farmhand can take a forge shift with a wage from the blacksmith's wallet. A single shift reserves one iron and the agreed wage. Completion consumes that iron, pays the worker and leaves the hoe at the forge. Older hamlet saves retain their original forge rules.
+
+The zero-player report runs each seed with an independent SQLite save. It records cumulative activity and per-good stock at the requested horizons. At the final horizon it also replays the committed journal to verify that stock balances match the save and that every coin movement has a source and destination.
+
 See [ADR 0001](adr/0001-transactional-snapshot.md) for persistence, [ADR 0002](adr/0002-standing-grain-offers.md) for pricing, [ADR 0003](adr/0003-village-travel.md) for travel, [ADR 0004](adr/0004-firewood-and-hearths.md) for hearths, [ADR 0005](adr/0005-charcoal-batches.md) for charcoal, [ADR 0006](adr/0006-ore-extraction-and-delivery.md) for ore, [ADR 0007](adr/0007-smelting.md) for smelting, [ADR 0008](adr/0008-forging.md) for forging, [ADR 0009](adr/0009-farm-tool-wear.md) for farm tools, [ADR 0010](adr/0010-seed-saving.md) for seed saving, and [Progress](PROGRESS.md) for observed results.

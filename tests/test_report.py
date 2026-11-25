@@ -1,7 +1,10 @@
+import tempfile
 import unittest
+from pathlib import Path
 
 from living_world.cli import main
-from living_world.model import Config, WorldError
+from living_world.model import COIN, FARM_OWNER, Config, WorldError
+from living_world.persistence import Save
 from living_world.report import parse_seeds, viability_report
 
 
@@ -17,6 +20,8 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(first["functional_seeds"], 2)
         self.assertEqual(set(first["runs"][0]["horizons"]), {"1", "7"})
         self.assertEqual(first["runs"][0]["horizons"]["7"]["population"], 9)
+        self.assertTrue(first["runs"][0]["checks"]["journal_balanced"])
+        self.assertEqual(first["runs"][0]["horizons"]["7"]["stock_by_good"][COIN], 156)
         self.assertEqual(without_runtime(viability_report("seed-trade", [0, 1], [1, 7], Config())),
                          without_runtime(first))
 
@@ -32,6 +37,15 @@ class ReportTests(unittest.TestCase):
         report = viability_report("seed-trade", [8], [7], Config(), "worker-loss")
         self.assertEqual(report["shock"], "worker-loss")
         self.assertTrue(report["runs"][0]["checks"]["coin_conserved"])
+
+    def test_inventory_audit_catches_balances_that_have_no_journal_entry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            save = Save.create(Path(directory) / "audit.db", 8, Config(), scenario="hamlet")
+            save.advance(days=1)
+            save.audit_inventory()
+            save.mutate(lambda sim: sim.world.inventory[FARM_OWNER].update({COIN: 0}))
+            with self.assertRaisesRegex(WorldError, "journal inventory does not match"):
+                save.audit_inventory()
 
     def test_inputs_are_validated(self):
         self.assertEqual(parse_seeds("0-2,7"), [0, 1, 2, 7])

@@ -134,7 +134,7 @@ def update_needs(
     if intent.kind in ("harvest", "cut_wood", "make_charcoal", "mine_ore", "smelt_iron", "forge_hoe"):
         fatigue = min(settings.fatigue_limit, fatigue + settings.work_fatigue)
     if intent.kind == "rest":
-        home = routes.FIELDS.get(intent.actor)
+        home = routes.fields_for(world).get(intent.actor)
         if world.content_version in FORESTRY_CONTENT_VERSIONS and home:
             heated = actor.location == home and warm_until > world.minute
             fatigue = 0 if heated else max(0, fatigue - settings.work_fatigue)

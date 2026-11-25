@@ -9,7 +9,7 @@ from .model import (
     COIN, IRON_HOE, TOOLS_CONTENT_VERSION, TOOLS_CONTENT_VERSIONS, HoeHarvest, MarketIntent, Movement, ToolIntent,
     Travel, World, WorldError,
 )
-from .routes import BLACKSMITH, FARMS, FIELDS, MARKET_SQUARE
+from .routes import BLACKSMITH, FARMS, MARKET_SQUARE
 
 HOE_PRICE = 15
 HOE_LIFETIME = 8
@@ -27,13 +27,14 @@ def enable_tools(world: World) -> None:
 
 
 def validate(world: World, intent: ToolIntent) -> None:
-    if world.content_version not in TOOLS_CONTENT_VERSIONS or intent.actor not in FARMS:
+    fields = routes.fields_for(world)
+    if world.content_version not in TOOLS_CONTENT_VERSIONS or intent.actor not in fields:
         raise WorldError("only farm owners can buy or install hoes in a tools save")
     actor = world.actors[intent.actor]
     if world.inventory[routes.pantry(intent.actor)][IRON_HOE]:
         raise WorldError("this farm already has an installed hoe")
     if intent.kind == "install_hoe":
-        if actor.location != FIELDS[intent.actor]:
+        if actor.location != fields[intent.actor]:
             raise WorldError("a hoe must be installed at the buyer's farm")
         if intent.duration != INSTALL_MINUTES or intent.price is not None:
             raise WorldError("installing a hoe requires the installation duration")
@@ -94,7 +95,7 @@ def procurement(
     actor = world.actors[farm]
     if usable(world, farm):
         return
-    home = FIELDS[farm]
+    home = routes.fields_for(world)[farm]
     if available(farm, IRON_HOE):
         if actor.location == home:
             yield ToolIntent("install_hoe", farm, INSTALL_MINUTES)
