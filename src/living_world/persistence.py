@@ -5,14 +5,17 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Callable, Iterator
+from collections import Counter
 from contextlib import closing, contextmanager
 from hashlib import sha256
 from pathlib import Path
 from typing import TypeVar
 
-from . import market
+from . import contracts, market, routes
 from .model import (
-    COIN, MARKET_CONTENT_VERSIONS, MAX_CLOCK, VILLAGE_CONTENT_VERSIONS, Action, Config, Intent, World, WorldError,
+    CIVILIAN_CONTENT_VERSIONS, COIN, CONTRACTS_CONTENT_VERSIONS, IRON_HAMMER, IRON_HOE, MARKET_CONTENT_VERSIONS,
+    MAX_CLOCK, VILLAGE_CONTENT_VERSIONS,
+    Action, Config, Intent, World, WorldError,
     canonical_json, integer,
 )
 from .observability import village_metrics
@@ -46,8 +49,11 @@ class Save:
     @classmethod
     def create(
         cls, path: Path, seed: int, config: Config | None = None, *, scenario: str = "lab",
+        player_name: str | None = None,
     ) -> Save:
-        sim = Simulation.create(seed, config if config is not None else Config(), scenario)
+        sim = Simulation.create(
+            seed, config if config is not None else Config(), scenario, player_name=player_name,
+        )
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("xb"):
             pass
@@ -107,6 +113,11 @@ class Save:
             db.execute("UPDATE world SET snapshot = ? WHERE id = 1",
                        (canonical_json(sim.world.snapshot()),))
         return result
+
+    def read(self, operation: Callable[[Simulation], T]) -> T:
+        with self.connect(readonly=True) as db, db:
+            db.execute("BEGIN")
+            return operation(Simulation(self.load_world(db)))
 
     def submit(self, key: str, intent: Intent) -> Action:
         return self.mutate(lambda sim: sim.submit(key, intent))
@@ -207,3 +218,15 @@ class Save:
                         target[good] = target.get(good, 0) + quantity
             if last_id != state.next_event_id - 1 or state.inventory != stock:
                 raise WorldError("journal inventory does not match the saved state")
+            if state.content_version in CIVILIAN_CONTENT_VERSIONS:
+                for good, records in ((IRON_HOE, state.crafted_hoes), (IRON_HAMMER, state.crafted_hammers)):
+                    crafted = Counter(record.account for record in records.values())
+                    physical = Counter({owner: account[good] for owner, account in stock.items() if account.get(good)})
+                    if crafted != physical:
+                        raise WorldError(f"{good} provenance does not match the saved balances")
+            if state.content_version in CONTRACTS_CONTENT_VERSIONS:
+                open_orders = Counter(order.farm for order in state.hoe_orders.values()
+                                      if order.status in contracts.OPEN_STATUSES)
+                for farm in routes.fields_for(state):
+                    if open_orders[farm] > 1 or stock[contracts.escrow(farm)][COIN] != open_orders[farm] * contracts.PRICE:
+                        raise WorldError(f"order escrow does not match the open orders for {farm}")

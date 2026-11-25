@@ -7,20 +7,25 @@ from dataclasses import asdict, replace
 from heapq import heapify, heappop, heappush
 from random import Random
 
-from . import blacksmith, farm_tools, forestry, kiln, market, mining, routes, seed_trade, smelting, village
+from . import blacksmith, contracts, craftsmanship, farm_tools, forestry, kiln, market, mining, routes, seed_trade, smelting, village
 from .model import (
-    COIN, FARM_OWNER, GRAIN, IRON, MARKET_CONTENT_VERSION, MARKET_CONTENT_VERSIONS, MAX_CLOCK, MAX_QUANTITY,
+    ANVIL, APPRENTICESHIP_CONTENT_VERSION, CIVILIAN_CONTENT_VERSION, CIVILIAN_CONTENT_VERSIONS, COIN,
+    CONTRACTS_CONTENT_VERSION, CONTRACTS_CONTENT_VERSIONS, FARM_OWNER, FIREWOOD, GRAIN, IRON,
+    IRON_HAMMER, IRON_HOE, MARKET_CONTENT_VERSION,
+    MARKET_CONTENT_VERSIONS, MAX_CLOCK, MAX_QUANTITY,
     HAMLET_CONTENT_VERSION, HAMLET_CONTENT_VERSIONS, SEED_GRAIN, SEED_SAVING_CONTENT_VERSION,
-    SEED_TRADE_CONTENT_VERSION, SPATIAL_CONTENT_VERSIONS, VILLAGE_CONTENT_VERSIONS,
+    SEED_TRADE_CONTENT_VERSION, SPATIAL_CONTENT_VERSIONS, VILLAGE_CONTENT_VERSIONS, WORKSHOP_CONTENT_VERSIONS,
     Action, Actor, CharcoalIntent,
     Config, Event, FirewoodIntent, ForgeIntent, HoeHarvest, Intent, MarketIntent, MiningIntent,
-    Movement, Scheduled, SeedIntent, SmeltingIntent, ToolIntent, Transfer, Travel, VillageIntent,
+    Movement, OrderIntent, Scheduled, SeedIntent, SmeltingIntent, ToolIntent, Transfer, Travel, VillageIntent,
     World, WorldError, integer,
 )
 
 COMPLETION_PRIORITY = 0
 DECISION_PRIORITY = 1
 NPC_ACTION_PREFIX = "npc-"
+PLAYER_ACTION_PREFIX = "player-"
+PLAYER_ID = "player"
 
 
 class Simulation:
@@ -34,11 +39,22 @@ class Simulation:
         self.random.setstate(world.rng_state)
 
     @classmethod
-    def create(cls, seed: int, config: Config, scenario: str = "lab") -> Simulation:
+    def create(
+        cls, seed: int, config: Config, scenario: str = "lab", *, player_name: str | None = None,
+    ) -> Simulation:
         integer("seed", seed, -MAX_CLOCK - 1, MAX_CLOCK)
         rng = Random(f"living-world:generation:{seed}")
-        hamlet = scenario == "hamlet"
-        with_seed_trade = scenario in ("seed-trade", "hamlet")
+        apprenticeship = scenario == "apprenticeship"
+        with_orders = apprenticeship or scenario == "contracts"
+        civilian = with_orders or scenario == "civilian"
+        hamlet = civilian or scenario == "hamlet"
+        if player_name is not None:
+            if not hamlet:
+                raise WorldError("a player character requires the hamlet or civilian scenarios")
+            player_name = player_name.strip()
+            if not 1 <= len(player_name) <= 32 or not player_name.isprintable():
+                raise WorldError("a character name needs 1 to 32 printable characters")
+        with_seed_trade = hamlet or scenario == "seed-trade"
         if with_seed_trade:
             scenario = "seed-saving"
         if scenario == "lab":
@@ -78,18 +94,30 @@ class Simulation:
             if scenario == "seed-saving":
                 world.content_version = SEED_TRADE_CONTENT_VERSION if with_seed_trade else SEED_SAVING_CONTENT_VERSION
                 if hamlet:
-                    world.content_version = HAMLET_CONTENT_VERSION
+                    world.content_version = CIVILIAN_CONTENT_VERSION if civilian else HAMLET_CONTENT_VERSION
                     world.inventory[blacksmith.FORGE_INPUTS] = {IRON: 0}
                     routes.add_hamlet_farms(world)
+                    if civilian:
+                        world.blacksmithing_xp[routes.BLACKSMITH] = blacksmith.EXPERIENCED_XP
+                        world.inventory[blacksmith.FORGE_INPUTS].update({ANVIL: 1, FIREWOOD: 0})
+                    if with_orders:
+                        world.content_version = APPRENTICESHIP_CONTENT_VERSION if apprenticeship else CONTRACTS_CONTENT_VERSION
+                        for farm in routes.fields_for(world):
+                            world.inventory[contracts.escrow(farm)] = {COIN: 0}
         else:
             raise WorldError(f"unknown scenario {scenario!r}")
+        if player_name is not None:
+            world.player_id = PLAYER_ID
+            world.actors[PLAYER_ID] = Actor(player_name, routes.FIELDS[FARM_OWNER])
+            world.inventory[PLAYER_ID] = {COIN: config.village.starting_hand_coin, GRAIN: 0}
         sim = cls(world)
         initialized = sim.record("world_initialized", {
             "inventory": {actor: stock.copy() for actor, stock in world.inventory.items()},
         })
         if world.content_version in VILLAGE_CONTENT_VERSIONS:
             for actor in sorted(world.actors):
-                sim.wake(actor, rng.randint(1, 30), initialized)
+                if actor != world.player_id:
+                    sim.wake(actor, rng.randint(1, 30), initialized)
         return sim
 
     def record(
@@ -109,7 +137,8 @@ class Simulation:
         self.enqueue(Scheduled(minute, priority, self.world.next_sequence, action_id))
 
     def wake(self, actor: str, delay: int, cause_id: int) -> None:
-        if self.world.content_version not in VILLAGE_CONTENT_VERSIONS or self.world.minute == MAX_CLOCK:
+        if (actor == self.world.player_id or self.world.content_version not in VILLAGE_CONTENT_VERSIONS
+                or self.world.minute == MAX_CLOCK):
             return
         if any(event.kind == "decide" and event.subject == actor for event in self.world.queue):
             return
@@ -136,6 +165,8 @@ class Simulation:
             return farm_tools.movements(intent)
         if isinstance(intent, SeedIntent):
             return seed_trade.movements(intent)
+        if isinstance(intent, OrderIntent):
+            return contracts.movements(self.world, intent)
         return village.activity_movements(intent, self.world, harvested=harvested)
 
     def available(self, owner: str, good: str) -> int:
@@ -150,6 +181,8 @@ class Simulation:
             raise WorldError("action id must have 1 to 64 letters, digits, underscores or hyphens")
         if cause_id is None and key.startswith(NPC_ACTION_PREFIX):
             raise WorldError(f"action ids starting with {NPC_ACTION_PREFIX!r} are reserved")
+        if self.world.player_id is not None and cause_id is None and key.startswith(PLAYER_ACTION_PREFIX):
+            raise WorldError(f"action ids starting with {PLAYER_ACTION_PREFIX!r} are reserved")
         if isinstance(intent, Transfer):
             integer("quantity", intent.quantity, 1, MAX_QUANTITY)
         integer("duration", intent.duration, 1, self.world.config.max_action_minutes)
@@ -159,17 +192,25 @@ class Simulation:
                 raise WorldError(f"action id {key!r} already belongs to a different intent")
             return existing
         self.validate(intent)
-        if intent.actor in self.active:
+        if self.is_busy(intent.actor):
             raise WorldError(f"actor {intent.actor!r} is already busy")
         if isinstance(intent, MarketIntent):
             self.validate_market_start(intent)
-        if (self.world.content_version == HAMLET_CONTENT_VERSION
-                and isinstance(intent, ForgeIntent) and intent.kind == "forge_hoe" and not self.forge_open()):
-            raise WorldError("the forge shift is occupied")
+        if isinstance(intent, ForgeIntent):
+            if (self.world.content_version in WORKSHOP_CONTENT_VERSIONS
+                    and intent.kind in blacksmith.WORKSHOP_ACTIVITIES and not self.forge_open()):
+                raise WorldError("the forge shift is occupied")
+            if intent.kind == "learn_hammer" and self.is_busy(routes.BLACKSMITH):
+                raise WorldError("Ada is busy")
+        if isinstance(intent, ForgeIntent) and intent.kind == "sell_hoe":
+            if not blacksmith.accepts_tools(self.world, self.available):
+                raise WorldError("Ada is stocked and has no open offer for a hoe")
         if isinstance(intent, SeedIntent) and intent.kind == "buy_seed":
             assert intent.seller is not None
             if not seed_trade.has_surplus(self.world, intent.seller, self.available):
                 raise WorldError(f"no surplus seed offered by {intent.seller}")
+        if isinstance(intent, OrderIntent):
+            self.validate_order_start(intent)
         reservations = [move for move in self.movements(intent) if move.source is not None]
         for move in reservations:
             if self.available(move.source, move.good) < move.quantity:
@@ -218,6 +259,9 @@ class Simulation:
         if isinstance(intent, SeedIntent):
             seed_trade.validate(self.world, intent)
             return
+        if isinstance(intent, OrderIntent):
+            contracts.validate(self.world, intent)
+            return
         if isinstance(intent, (VillageIntent, MarketIntent)):
             village.validate_activity(self.world, intent)
             if isinstance(intent, MarketIntent):
@@ -255,6 +299,32 @@ class Simulation:
         elif intent.kind == "harvest" and intent.actor != intent.farm and not self.hired_shift_open(intent.farm):
             raise WorldError(f"the hired field shift is occupied at {intent.farm}")
 
+    def reserved_order_items(self) -> frozenset[str]:
+        return frozenset(
+            action.intent.item_id for action in self.active.values()
+            if isinstance(action.intent, OrderIntent) and action.intent.item_id is not None
+        )
+
+    def validate_order_start(self, intent: OrderIntent) -> None:
+        if intent.kind == "post_order":
+            if self.available(routes.stall(routes.BLACKSMITH), IRON_HOE):
+                raise WorldError("the blacksmith stall already has a hoe for sale")
+            if self.world.minute + intent.duration + 2 * self.world.config.minutes_per_day > MAX_CLOCK:
+                raise WorldError("the order deadline would exceed the simulation clock")
+            return
+        if intent.order_id is None:
+            return
+        order = self.world.hoe_orders[intent.order_id]
+        if self.world.minute + intent.duration >= order.deadline:
+            raise WorldError("the hoe order closes before this action can finish")
+        if intent.kind == "accept_order" and any(
+            isinstance(action.intent, OrderIntent) and action.intent.kind == "accept_order"
+            and action.intent.order_id == intent.order_id for action in self.active.values()
+        ):
+            raise WorldError("another supplier is accepting this order")
+        if intent.item_id in self.reserved_order_items():
+            raise WorldError("this hoe already has a pending delivery")
+
     def hired_shift_open(self, farm: str) -> bool:
         shifts = (self.world.config.hamlet.hired_shifts_per_farm
                   if self.world.content_version in HAMLET_CONTENT_VERSIONS else 1)
@@ -265,8 +335,21 @@ class Simulation:
         ) < shifts
 
     def forge_open(self) -> bool:
-        return not any(isinstance(action.intent, ForgeIntent) and action.intent.kind == "forge_hoe"
+        return not any(isinstance(action.intent, ForgeIntent) and action.intent.kind in blacksmith.WORKSHOP_ACTIVITIES
                        for action in self.active.values())
+
+    def is_busy(self, actor: str) -> bool:
+        return actor in self.active or (
+            self.world.content_version == APPRENTICESHIP_CONTENT_VERSION and actor == routes.BLACKSMITH
+            and any(isinstance(action.intent, ForgeIntent)
+                                               and action.intent.kind == "learn_hammer"
+                                               for action in self.active.values())
+        )
+
+    def wake_after_action(self, intent: Intent, cause: int) -> None:
+        self.wake(intent.actor, 1, cause)
+        if isinstance(intent, ForgeIntent) and intent.kind == "learn_hammer":
+            self.wake(routes.BLACKSMITH, 1, cause)
 
     def forge_hire_inbound(self) -> bool:
         return any(
@@ -294,7 +377,7 @@ class Simulation:
         action.outcome_event = self.record("action_canceled", {"action": key},
                                            action.start_event if cause_id is None else cause_id)
         del self.active[action.intent.actor]
-        self.wake(action.intent.actor, 1, action.outcome_event)
+        self.wake_after_action(action.intent, action.outcome_event)
         return action
 
     def complete(self, key: str) -> None:
@@ -314,7 +397,7 @@ class Simulation:
         else:
             self.apply(key, action)
         assert action.outcome_event is not None
-        self.wake(intent.actor, 1, action.outcome_event)
+        self.wake_after_action(intent, action.outcome_event)
 
     def apply(self, key: str, action: Action) -> None:
         intent = action.intent
@@ -334,6 +417,30 @@ class Simulation:
         if isinstance(intent, ToolIntent) and intent.kind == "install_hoe":
             self.world.hoe_uses[intent.actor] = farm_tools.HOE_LIFETIME
             tool_details["hoe_uses_remaining"] = farm_tools.HOE_LIFETIME
+        if self.world.content_version in CIVILIAN_CONTENT_VERSIONS:
+            made = None
+            if isinstance(intent, ForgeIntent):
+                if intent.kind == "learn_hammer":
+                    self.world.hammer_training.append(intent.actor)
+                    tool_details["learned_recipe"] = "hammer"
+                elif intent.kind in blacksmith.FORGE_RECIPES:
+                    bonus = 0
+                    if hammer := craftsmanship.use_hammer(self.world, intent.actor):
+                        item, uses_left, bonus = hammer
+                        tool_details.update(hammer_used=item, hammer_uses_remaining=uses_left, hammer_quality_bonus=bonus)
+                        if uses_left == 0:
+                            movements += (Movement(intent.actor, None, IRON_HAMMER, 1),)
+                    made = craftsmanship.make_tool(self.world, intent, action.start_event, bonus)
+                    xp = self.world.blacksmithing_xp.get(intent.actor, 0) + 1
+                    self.world.blacksmithing_xp[intent.actor] = xp
+                    tool_details["blacksmithing_xp"] = xp
+            if isinstance(intent, HoeHarvest):
+                tool_details["hoe_used"] = craftsmanship.record_wear(self.world, intent.farm)
+            selected = intent.item_id if isinstance(intent, OrderIntent) else None
+            reserved = self.reserved_order_items() if self.world.content_version in CONTRACTS_CONTENT_VERSIONS else frozenset()
+            tool_details.update(craftsmanship.update_inventory(
+                self.world, movements, made, selected=selected, reserved=reserved,
+            ))
         self.apply_movements(movements)
         if isinstance(intent, Travel):
             actor = self.world.actors[intent.actor]
@@ -363,6 +470,14 @@ class Simulation:
             kind = f"{intent.kind}_completed"
             if intent.seller is not None:
                 payload.update(seller=intent.seller, price=seed_trade.SEED_PRICE)
+        if isinstance(intent, OrderIntent):
+            kind = f"{intent.kind}_completed"
+            if intent.kind != "collect_order":
+                order_id, order = contracts.apply(self.world, intent)
+                payload.update(order_id=order_id, order=asdict(order))
+                if intent.kind == "post_order":
+                    self.enqueue(Scheduled(order.deadline, COMPLETION_PRIORITY, self.world.next_sequence,
+                                           order_id, "order_deadline", order.funding_event))
         action.status = "completed"
         action.outcome_event = self.record(kind, payload, action.start_event)
 
@@ -373,6 +488,20 @@ class Simulation:
             if move.destination is not None:
                 inventory = self.world.inventory[move.destination]
                 inventory[move.good] = inventory.get(move.good, 0) + move.quantity
+
+    def expire_order(self, event: Scheduled) -> None:
+        order = self.world.hoe_orders[event.subject]
+        if order.status not in contracts.OPEN_STATUSES:
+            return
+        source = contracts.escrow(order.farm)
+        if self.available(source, COIN) != contracts.PRICE:
+            raise WorldError("the order escrow does not match its promised payment")
+        refund = Movement(source, order.farm, COIN, contracts.PRICE)
+        self.apply_movements((refund,))
+        self.world.hoe_orders[event.subject] = replace(order, status="expired")
+        self.record("order_expired", {
+            "order_id": event.subject, "farm": order.farm, "supplier": order.supplier, "movements": [asdict(refund)],
+        }, event.cause_id)
 
     def market_shock(self, shock: market.MarketShock) -> None:
         if self.world.content_version not in MARKET_CONTENT_VERSIONS:
@@ -394,7 +523,7 @@ class Simulation:
             cause = self.record("worker_sidelined", {"actor": worker})
             shift = self.active.get(worker)
             if shift and isinstance(shift.intent, (MarketIntent, ForgeIntent)) and shift.intent.kind in (
-                "harvest", "forge_hoe",
+                "harvest", *blacksmith.FORGE_RECIPES,
             ):
                 key = next(key for key, action in self.world.actions.items() if action is shift)
                 self.cancel(key, cause_id=cause)
@@ -403,12 +532,12 @@ class Simulation:
 
     def decide(self, event: Scheduled) -> None:
         actor = event.subject
-        if actor in self.active or not self.world.actors[actor].alive:
+        if self.is_busy(actor) or not self.world.actors[actor].alive:
             return
         settings = self.world.config.village
         rejected: dict[str, str] = {}
         if self.world.content_version in SPATIAL_CONTENT_VERSIONS:
-            forge_jobs = self.world.content_version == HAMLET_CONTENT_VERSION
+            forge_jobs = self.world.content_version in WORKSHOP_CONTENT_VERSIONS
             options = market.route_choices(
                 self.world, actor, self.available, self.hired_shift_open, self.hoe_is_free,
                 forge_open=forge_jobs and self.forge_open(),
@@ -454,6 +583,8 @@ class Simulation:
             self.world.minute = event.minute
             if event.kind == "complete":
                 self.complete(event.subject)
+            elif event.kind == "order_deadline":
+                self.expire_order(event)
             else:
                 self.decide(event)
             processed += 1

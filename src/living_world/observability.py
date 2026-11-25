@@ -6,12 +6,15 @@ from collections import Counter
 from collections.abc import Iterable
 from dataclasses import asdict
 
-from . import blacksmith, forestry, kiln, market, mining, routes, smelting
+from . import blacksmith, contracts, forestry, kiln, market, mining, routes, smelting
 from .model import (
-    BLACKSMITH_CONTENT_VERSIONS, CHARCOAL, COIN, FARMSTEAD, FIREWOOD, FORESTRY_CONTENT_VERSIONS,
-    GRAIN, HAMLET_CONTENT_VERSION, IRON, IRON_HOE, IRON_ORE, KILN_CONTENT_VERSIONS, MINING_CONTENT_VERSIONS, ORE_IN_VEIN,
+    APPRENTICESHIP_CONTENT_VERSION, BLACKSMITH_CONTENT_VERSIONS, CHARCOAL, CIVILIAN_CONTENT_VERSIONS,
+    COIN, CONTRACTS_CONTENT_VERSIONS,
+    FARMSTEAD, FIREWOOD, FORESTRY_CONTENT_VERSIONS,
+    GRAIN, IRON, IRON_HAMMER, IRON_HOE, IRON_ORE, KILN_CONTENT_VERSIONS, MINING_CONTENT_VERSIONS, ORE_IN_VEIN,
     SEED_GRAIN, SEED_SAVING_CONTENT_VERSIONS, SEED_TRADE_CONTENT_VERSIONS, SMELTING_CONTENT_VERSIONS, SPATIAL_CONTENT_VERSIONS,
-    STANDING_WOOD, TOOLS_CONTENT_VERSIONS, CharcoalDelivery, CharcoalIntent, FirewoodDelivery, ForgeIntent,
+    STANDING_WOOD, TOOLS_CONTENT_VERSIONS, WORKSHOP_CONTENT_VERSIONS, CharcoalDelivery, CharcoalIntent,
+    FirewoodDelivery, ForgeIntent,
     HoeDelivery, IronDelivery, OreDelivery, SmeltingIntent, Travel, World,
 )
 from .routes import BLACKSMITH, CHARCOAL_BURNER, MINE_STOCK, MINER, SMELTER, WOODCUTTER
@@ -27,6 +30,13 @@ def village_metrics(
     wages = 0
     forge_wages = 0
     hired_forge_shifts = 0
+    forge_rent = 0
+    independent_hoes = 0
+    hammers_retired = 0
+    lesson_fees = 0
+    hoe_buys = 0
+    order_payments = 0
+    order_refunds = 0
     craft_workers_in_fields: Counter[str] = Counter()
     sales = 0
     farms = routes.fields_for(world)
@@ -70,8 +80,9 @@ def village_metrics(
         if "farm" in payload:
             if kind == "harvest_completed":
                 harvests_by_farm[payload["farm"]] += 1
-                if payload["actor"] not in farms and not payload["actor"].startswith("farmhand-"):
-                    craft_workers_in_fields[payload["actor"]] += 1
+                worker = payload["actor"]
+                if worker != world.player_id and worker not in farms and not worker.startswith("farmhand-"):
+                    craft_workers_in_fields[worker] += 1
             elif kind == "buy_food_completed":
                 purchases_by_seller[payload["farm"]] += 1
                 prices_paid[str(payload["price"])] += 1
@@ -151,14 +162,28 @@ def village_metrics(
                     iron_produced += quantity
                 else:
                     smelting_inputs[good] += quantity
-            elif kind == "forge_hoe_completed":
+            elif kind in ("forge_hoe_completed", "forge_hammer_completed"):
                 if good == IRON_HOE:
                     hoes_forged += quantity
-                elif good == IRON:
+                elif good == IRON_HAMMER and movement["destination"] is None:
+                    hammers_retired += quantity
+                elif good in (IRON, FIREWOOD):
                     forging_inputs[good] += quantity
                 elif good == COIN:
-                    forge_wages += quantity
-                    hired_forge_shifts += 1
+                    if movement["destination"] == BLACKSMITH:
+                        forge_rent += quantity
+                        independent_hoes += int(kind == "forge_hoe_completed")
+                    else:
+                        forge_wages += quantity
+                        hired_forge_shifts += 1
+            elif kind == "learn_hammer_completed" and good == COIN:
+                lesson_fees += quantity
+            elif kind == "sell_hoe_completed" and good == COIN:
+                hoe_buys += quantity
+            elif kind == "deliver_order_completed" and good == COIN:
+                order_payments += quantity
+            elif kind == "order_expired" and good == COIN:
+                order_refunds += quantity
     metrics: dict[str, object] = {
         "grain_produced": grain_produced,
         "grain_eaten": grain_eaten,
@@ -302,7 +327,7 @@ def village_metrics(
                 "forge_finishes_at": next(
                     (action.finishes_at for action in world.actions.values()
                      if action.status == "started" and isinstance(action.intent, ForgeIntent)
-                     and action.intent.kind == "forge_hoe"),
+                     and action.intent.kind in blacksmith.FORGE_RECIPES),
                     None,
                 ),
             }
@@ -319,11 +344,40 @@ def village_metrics(
                 "bonus_grain": bonus_grain,
                 "remaining_uses_by_farm": world.hoe_uses.copy(),
             }
-        if world.content_version == HAMLET_CONTENT_VERSION:
+        if world.content_version in WORKSHOP_CONTENT_VERSIONS:
             metrics["employment"] = {
                 "hired_forge_shifts": hired_forge_shifts,
                 "coin_paid_in_forge_wages": forge_wages,
                 "craft_workers_field_shifts": dict(sorted(craft_workers_in_fields.items())),
+            }
+        if world.content_version in CIVILIAN_CONTENT_VERSIONS:
+            metrics["craftsmanship"] = {
+                "blacksmithing_xp": world.blacksmithing_xp.copy(),
+                "firewood_consumed_at_forge": forging_inputs[FIREWOOD],
+                "hoes_in_circulation": len(world.crafted_hoes),
+                "independent_hoes_forged": independent_hoes,
+                "coins_paid_for_forge_rent": forge_rent,
+                "coins_paid_to_independent_smiths": hoe_buys,
+            }
+        if world.content_version in CONTRACTS_CONTENT_VERSIONS:
+            metrics["orders"] = {
+                "posted": counts["post_order_completed"],
+                "accepted": counts["accept_order_completed"],
+                "delivered": counts["deliver_order_completed"],
+                "expired": counts["order_expired"],
+                "collected": counts["collect_order_completed"],
+                "coins_paid": order_payments,
+                "coins_refunded": order_refunds,
+                "coin_in_escrow": sum(world.inventory[contracts.escrow(farm)][COIN] for farm in farms),
+            }
+        if world.content_version == APPRENTICESHIP_CONTENT_VERSION:
+            metrics["apprenticeship"] = {
+                "lessons_completed": counts["learn_hammer_completed"],
+                "coins_paid_for_lessons": lesson_fees,
+                "trained_workers": sorted(world.hammer_training),
+                "hammers_forged": counts["forge_hammer_completed"],
+                "hammers_retired": hammers_retired,
+                "hammers_in_circulation": len(world.crafted_hammers),
             }
         if world.content_version in SEED_SAVING_CONTENT_VERSIONS:
             metrics["seed_saving"] = {

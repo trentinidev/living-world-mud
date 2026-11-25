@@ -1,6 +1,6 @@
 # Living World
 
-Living World is a local, text-based fantasy MUD under development. The prototype runs a deterministic simulation from the command line. In the `seed-saving` scenario, farmers buy and replace iron hoes and set aside part of the harvest for the next planting.
+Living World is a local, text-based fantasy MUD under development. Run a deterministic village from the command line or create a civilian and earn a living in the hamlet.
 
 ## Run locally
 
@@ -13,6 +13,107 @@ python -m venv .venv
 ```
 
 On macOS and Linux, use `.venv/bin/python`. To run directly from the source tree without installing packages, set `PYTHONPATH=src` in your shell (`$env:PYTHONPATH = "src"` in PowerShell), then use `python -m living_world`.
+
+## Play as a civilian
+
+### In the browser on Windows
+
+1. Open PowerShell in the project folder and create a save with a player character.
+
+   ```powershell
+   .\.venv\Scripts\living-world.exe create --scenario apprenticeship --seed 8 --player "Iara" --save saves/iara-web.db
+   ```
+
+2. Open the local game in your browser. Use the same command to resume that save on another day.
+
+   ```powershell
+   .\.venv\Scripts\living-world.exe web --save saves/iara-web.db --open
+   ```
+
+   Leave this PowerShell window open while playing. If the tab does not open automatically, paste `http://127.0.0.1:8765` into your browser. Use `--port 8766` if 8765 is already in use.
+
+3. Click **Trabalhar no campo**, **Praça do mercado**, **Comprar grão** and **Comer grão**. With seed 8, Iara begins with three coins and ends this route with four. The page also has forge, market and contract buttons when you reach those locations. The command box accepts the same commands as the terminal.
+
+   The game saves a successful action immediately. Press **Ctrl+C** in PowerShell to close the local server.
+
+### In the terminal
+
+1. In PowerShell, from the project folder, create a new hamlet save. You can change the character's name and choose a different file name for each new game.
+
+   ```powershell
+   .\.venv\Scripts\living-world.exe create --scenario hamlet --seed 8 --player "Iara" --save saves/iara.db
+   ```
+
+2. Open the save.
+
+   ```powershell
+   .\.venv\Scripts\living-world.exe play --save saves/iara.db
+   ```
+
+3. At the `>` prompt, enter one command at a time.
+
+   ```text
+   look
+   work
+   go market-square
+   market
+   buy
+   eat
+   inventory
+   quit
+   ```
+
+   With seed 8, Iara starts near the market with three coins. The first field shift pays two coins and the first grain purchase costs one. Type `help` for the other commands. Each successful action saves automatically. Repeat step 2 to resume.
+
+## Learn blacksmithing and sell a hoe
+
+1. Create and open a new `civilian` save. This scenario includes the workshop and blacksmithing progression.
+
+   ```powershell
+   .\.venv\Scripts\living-world.exe create --scenario civilian --seed 8 --player "Iara" --save saves/iara-smith.db
+   .\.venv\Scripts\living-world.exe play --save saves/iara-smith.db
+   ```
+
+2. For your first paid forge shift in this seed, enter these commands one at a time.
+
+   ```text
+   go market-square
+   go forge
+   wait 1033
+   look
+   work
+   skills
+   ```
+
+   After the wait, Ada has unloaded the first iron bar and there is a funded shift. On completion you earn two coins and one point of blacksmithing experience. The hoe goes to Ada. In other worlds, use `look` to check whether the forge has an opening.
+
+3. To make a hoe you can sell, earn at least 15 coins from paid work. Check market stock with `market`, buy one bar with `buy iron` and one bundle with `buy firewood`, and go to the forge. Use `craft hoe` when the space is free. The one-coin rent is paid when the hoe is finished. At the market, `sell hoe` transfers the hoe to Ada for 16 coins when she has room and enough money. Use `inventory` to see the maker's tool quality and remaining uses before selling.
+
+## Work on a farm's hoe order
+
+1. Create and open a `contracts` save.
+
+   ```powershell
+   .\.venv\Scripts\living-world.exe create --scenario contracts --seed 8 --player "Iara" --save saves/iara-orders.db
+   .\.venv\Scripts\living-world.exe play --save saves/iara-orders.db
+   ```
+
+2. At the game prompt, type `go market-square`, `wait 804`, and `orders`. For seed 8, the west farm has reserved 19 coins for a hoe of quality 40 or higher. The board shows the order ID, its deadline, and whether a supplier has taken it.
+
+3. Enter `accept <order-id>` using the ID shown on the board. After making a qualifying hoe, return to the market and enter `deliver <order-id>` to hand it over and receive payment. An order that reaches its deadline refunds the issuing farm. Ada can take an available order when her stall has a qualifying hoe.
+
+## Learn to make a hammer
+
+1. Create and open an `apprenticeship` save.
+
+   ```powershell
+   .\.venv\Scripts\living-world.exe create --scenario apprenticeship --seed 8 --player "Iara" --save saves/iara-apprentice.db
+   .\.venv\Scripts\living-world.exe play --save saves/iara-apprentice.db
+   ```
+
+2. Enter `go market-square`, `go forge`, and `learn hammer`. Ada is available at the forge at the start of seed 8. The 60-minute lesson costs two coins. Use `skills` to check the recipe after the lesson.
+
+3. Buy a bar of iron and a bundle of firewood, take them to the forge, and enter `craft hammer`. The forge rent costs one coin. A finished hammer lasts six uses and improves the quality of future work while you carry it. Check `inventory` to see the remaining uses.
 
 ## Run a 31-person hamlet
 

@@ -20,7 +20,13 @@ TOOLS_CONTENT_VERSION = "village-tools-1"
 SEED_SAVING_CONTENT_VERSION = "village-seed-saving-1"
 SEED_TRADE_CONTENT_VERSION = "village-seed-trade-1"
 HAMLET_CONTENT_VERSION = "village-hamlet-2"
-HAMLET_CONTENT_VERSIONS = ("village-hamlet-1", HAMLET_CONTENT_VERSION)
+CIVILIAN_CONTENT_VERSION = "village-civilian-1"
+CONTRACTS_CONTENT_VERSION = "village-contracts-1"
+APPRENTICESHIP_CONTENT_VERSION = "village-apprenticeship-1"
+CONTRACTS_CONTENT_VERSIONS = (CONTRACTS_CONTENT_VERSION, APPRENTICESHIP_CONTENT_VERSION)
+CIVILIAN_CONTENT_VERSIONS = (CIVILIAN_CONTENT_VERSION, *CONTRACTS_CONTENT_VERSIONS)
+WORKSHOP_CONTENT_VERSIONS = (HAMLET_CONTENT_VERSION, *CIVILIAN_CONTENT_VERSIONS)
+HAMLET_CONTENT_VERSIONS = ("village-hamlet-1", *WORKSHOP_CONTENT_VERSIONS)
 SEED_TRADE_CONTENT_VERSIONS = (SEED_TRADE_CONTENT_VERSION, *HAMLET_CONTENT_VERSIONS)
 SEED_SAVING_CONTENT_VERSIONS = (SEED_SAVING_CONTENT_VERSION, *SEED_TRADE_CONTENT_VERSIONS)
 TOOLS_CONTENT_VERSIONS = (TOOLS_CONTENT_VERSION, *SEED_SAVING_CONTENT_VERSIONS)
@@ -44,6 +50,8 @@ ORE_IN_VEIN = "ore_in_vein"
 IRON_ORE = "iron_ore"
 IRON = "iron"
 IRON_HOE = "iron_hoe"
+IRON_HAMMER = "iron_hammer"
+ANVIL = "anvil"
 DEFAULT_STANDING_WOOD = 240
 DEFAULT_ORE_DEPOSIT = 120
 DEFAULT_SEED_RESERVE_TARGET = 4
@@ -280,10 +288,16 @@ class SmeltingIntent:
 
 @dataclass(frozen=True, slots=True)
 class ForgeIntent:
-    kind: Literal["buy_iron", "store_forge_iron", "forge_hoe"]
+    kind: Literal["buy_iron", "store_forge_iron", "store_forge_fuel", "forge_hoe", "sell_hoe",
+                  "learn_hammer", "forge_hammer"]
     actor: str
     duration: int
     price: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PersonalForge(ForgeIntent):
+    personal: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -302,9 +316,18 @@ class SeedIntent:
     seller: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class OrderIntent:
+    kind: Literal["post_order", "accept_order", "deliver_order", "collect_order"]
+    actor: str
+    duration: int = 1
+    order_id: str | None = None
+    item_id: str | None = None
+
+
 Intent = (
     Transfer | VillageIntent | MarketIntent | Travel | FirewoodIntent
-    | CharcoalIntent | MiningIntent | SmeltingIntent | ForgeIntent | ToolIntent | SeedIntent
+    | CharcoalIntent | MiningIntent | SmeltingIntent | ForgeIntent | ToolIntent | SeedIntent | OrderIntent
 )
 
 
@@ -332,7 +355,7 @@ class Scheduled:
     priority: int
     sequence: int
     subject: str = field(compare=False)
-    kind: Literal["complete", "decide"] = field(default="complete", compare=False)
+    kind: Literal["complete", "decide", "order_deadline"] = field(default="complete", compare=False)
     cause_id: int | None = field(default=None, compare=False)
 
 
@@ -343,6 +366,30 @@ class Event:
     kind: str
     payload: dict[str, object]
     cause_id: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CraftedTool:
+    maker: str
+    account: str
+    quality: int
+    uses_left: int
+    iron_source: str
+    fuel_source: str
+    made_at: int
+
+
+CraftedHoe = CraftedTool
+
+
+@dataclass(frozen=True, slots=True)
+class HoeOrder:
+    farm: str
+    deadline: int
+    funding_event: int
+    status: Literal["open", "accepted", "delivered", "expired"] = "open"
+    supplier: str | None = None
+    item_id: str | None = None
 
 
 @dataclass(slots=True)
@@ -360,10 +407,26 @@ class World:
     rules_version: int = RULES_VERSION
     content_version: str = LAB_CONTENT_VERSION
     hoe_uses: dict[str, int] = field(default_factory=dict)
+    player_id: str | None = None
+    blacksmithing_xp: dict[str, int] = field(default_factory=dict)
+    crafted_hoes: dict[str, CraftedTool] = field(default_factory=dict)
+    crafted_hammers: dict[str, CraftedTool] = field(default_factory=dict)
+    hammer_training: list[str] = field(default_factory=list)
+    hoe_orders: dict[str, HoeOrder] = field(default_factory=dict)
 
     def snapshot(self) -> dict[str, object]:
         data = asdict(self)
         data["queue"] = [asdict(event) for event in sorted(self.queue)]
+        if self.player_id is None:
+            del data["player_id"]
+        if self.content_version not in CIVILIAN_CONTENT_VERSIONS:
+            del data["blacksmithing_xp"]
+            del data["crafted_hoes"]
+        if self.content_version not in CONTRACTS_CONTENT_VERSIONS:
+            del data["hoe_orders"]
+        if self.content_version != APPRENTICESHIP_CONTENT_VERSION:
+            del data["crafted_hammers"]
+            del data["hammer_training"]
         if self.content_version not in TOOLS_CONTENT_VERSIONS:
             del data["hoe_uses"]
         if (self.content_version not in SEED_SAVING_CONTENT_VERSIONS
@@ -371,7 +434,7 @@ class World:
             del data["config"]["village"]["seed_reserve_target"]
         if self.content_version not in HAMLET_CONTENT_VERSIONS and self.config.hamlet == DEFAULT_HAMLET:
             del data["config"]["hamlet"]
-        elif self.content_version != HAMLET_CONTENT_VERSION and self.config.hamlet.farms == 2:
+        elif self.content_version not in WORKSHOP_CONTENT_VERSIONS and self.config.hamlet.farms == 2:
             del data["config"]["hamlet"]["farms"]
         if self.content_version not in MARKET_CONTENT_VERSIONS:
             for actor in data["actors"].values():
@@ -419,12 +482,17 @@ class World:
                 intent = MiningIntent(**raw_intent)
             elif raw_intent.get("kind") in ("buy_iron_ore", "buy_charcoal", "smelt_iron"):
                 intent = SmeltingIntent(**raw_intent)
-            elif raw_intent.get("kind") in ("buy_iron", "store_forge_iron", "forge_hoe"):
+            elif "personal" in raw_intent:
+                intent = PersonalForge(**raw_intent)
+            elif raw_intent.get("kind") in ("buy_iron", "store_forge_iron", "store_forge_fuel", "forge_hoe",
+                                             "sell_hoe", "learn_hammer", "forge_hammer"):
                 intent = ForgeIntent(**raw_intent)
             elif raw_intent.get("kind") in ("buy_hoe", "install_hoe"):
                 intent = ToolIntent(**raw_intent)
             elif raw_intent.get("kind") in ("buy_seed", "store_seed"):
                 intent = SeedIntent(**raw_intent)
+            elif "order_id" in raw_intent:
+                intent = OrderIntent(**raw_intent)
             elif "kind" in raw_intent:
                 intent = VillageIntent(**raw_intent)
             else:
@@ -436,4 +504,7 @@ class World:
             "actors": {key: Actor(**value) for key, value in data["actors"].items()},
             "actions": actions,
             "queue": [Scheduled(**value) for value in data["queue"]],
+            "crafted_hoes": {key: CraftedTool(**value) for key, value in data.get("crafted_hoes", {}).items()},
+            "crafted_hammers": {key: CraftedTool(**value) for key, value in data.get("crafted_hammers", {}).items()},
+            "hoe_orders": {key: HoeOrder(**value) for key, value in data.get("hoe_orders", {}).items()},
         }))

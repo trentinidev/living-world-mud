@@ -131,7 +131,7 @@ def update_needs(
     details: dict[str, int | bool] = {}
     if intent.kind == "eat":
         hunger = max(0, hunger - settings.meal_relief)
-    if intent.kind in ("harvest", "cut_wood", "make_charcoal", "mine_ore", "smelt_iron", "forge_hoe"):
+    if intent.kind in ("harvest", "cut_wood", "make_charcoal", "mine_ore", "smelt_iron", "forge_hoe", "forge_hammer"):
         fatigue = min(settings.fatigue_limit, fatigue + settings.work_fatigue)
     if intent.kind == "rest":
         home = routes.fields_for(world).get(intent.actor)

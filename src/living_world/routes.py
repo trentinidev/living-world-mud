@@ -6,10 +6,11 @@ from dataclasses import replace
 
 from .model import (
     BLACKSMITH_CONTENT_VERSIONS, CHARCOAL, CHARCOAL_CONTENT_VERSION, FARM_OWNER, FIREWOOD,
-    FORESTRY_CONTENT_VERSIONS, GRAIN, HAMLET_CONTENT_VERSION, IRON, IRON_HOE, IRON_ORE, MAX_QUANTITY,
+    FORESTRY_CONTENT_VERSIONS, GRAIN, IRON, IRON_HOE, IRON_ORE, MAX_QUANTITY,
     MINING_CONTENT_VERSIONS,
     ROUTES_CONTENT_VERSION, SEED_GRAIN, SMELTING_CONTENT_VERSIONS, SPATIAL_CONTENT_VERSIONS,
-    TOOLS_CONTENT_VERSIONS, Actor, CharcoalDelivery, FirewoodDelivery, HoeDelivery, IronDelivery, Movement,
+    TOOLS_CONTENT_VERSIONS, WORKSHOP_CONTENT_VERSIONS, Actor, CharcoalDelivery, FirewoodDelivery, HoeDelivery,
+    IronDelivery, Movement,
     OreDelivery, Travel, World, WorldError, integer,
 )
 
@@ -47,7 +48,7 @@ HAMLET_FARM_SITES = (
 
 
 def extra_farm_sites(world: World) -> tuple[tuple[str, str, str, int], ...]:
-    if world.content_version != HAMLET_CONTENT_VERSION:
+    if world.content_version not in WORKSHOP_CONTENT_VERSIONS:
         return ()
     return HAMLET_FARM_SITES[:world.config.hamlet.farms - len(FARMS)]
 

@@ -6,7 +6,8 @@ from collections.abc import Callable, Iterator
 
 from . import forestry, routes
 from .model import (
-    COIN, IRON_HOE, TOOLS_CONTENT_VERSION, TOOLS_CONTENT_VERSIONS, HoeHarvest, MarketIntent, Movement, ToolIntent,
+    CIVILIAN_CONTENT_VERSIONS, COIN, IRON_HOE, TOOLS_CONTENT_VERSION, TOOLS_CONTENT_VERSIONS,
+    HoeHarvest, MarketIntent, Movement, ToolIntent,
     Travel, World, WorldError,
 )
 from .routes import BLACKSMITH, FARMS, MARKET_SQUARE
@@ -15,6 +16,10 @@ HOE_PRICE = 15
 HOE_LIFETIME = 8
 HOE_BONUS = 2
 INSTALL_MINUTES = 10
+
+
+def hoe_price(world: World) -> int:
+    return 18 if world.content_version in CIVILIAN_CONTENT_VERSIONS else HOE_PRICE
 
 
 def enable_tools(world: World) -> None:
@@ -46,8 +51,8 @@ def validate(world: World, intent: ToolIntent) -> None:
         raise WorldError("buying a hoe requires a customer at the open blacksmith stall")
     if world.inventory[intent.actor][IRON_HOE]:
         raise WorldError("this farmer already carries a hoe")
-    if type(intent.price) is not int or intent.price != HOE_PRICE:
-        raise WorldError(f"a hoe costs {HOE_PRICE} coins")
+    if type(intent.price) is not int or intent.price != hoe_price(world):
+        raise WorldError(f"a hoe costs {hoe_price(world)} coins")
     if intent.duration != world.config.village.purchase_minutes:
         raise WorldError("duration does not match the hoe purchase rules")
 
@@ -55,9 +60,10 @@ def validate(world: World, intent: ToolIntent) -> None:
 def movements(intent: ToolIntent) -> tuple[Movement, ...]:
     if intent.kind == "install_hoe":
         return (Movement(intent.actor, routes.pantry(intent.actor), IRON_HOE, 1),)
+    assert intent.price is not None
     return (
         Movement(routes.stall(BLACKSMITH), intent.actor, IRON_HOE, 1),
-        Movement(intent.actor, BLACKSMITH, COIN, HOE_PRICE),
+        Movement(intent.actor, BLACKSMITH, COIN, intent.price),
     )
 
 
@@ -101,10 +107,10 @@ def procurement(
             yield ToolIntent("install_hoe", farm, INSTALL_MINUTES)
         else:
             yield routes.next_leg(world, farm, actor.location, home)
-    elif (available(farm, COIN) >= HOE_PRICE + world.config.village.meal_price
+    elif (available(farm, COIN) >= hoe_price(world) + world.config.village.meal_price
           and world.actors[BLACKSMITH].alive and available(routes.stall(BLACKSMITH), IRON_HOE)):
         if actor.location == MARKET_SQUARE:
-            yield ToolIntent("buy_hoe", farm, world.config.village.purchase_minutes, price=HOE_PRICE)
+            yield ToolIntent("buy_hoe", farm, world.config.village.purchase_minutes, price=hoe_price(world))
         else:
             grain = delivery_grain if actor.location == home else 0
             yield routes.next_leg(world, farm, actor.location, MARKET_SQUARE, grain=grain)

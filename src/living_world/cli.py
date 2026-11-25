@@ -1,4 +1,4 @@
-"""Headless command line for save creation, advancement and inspection."""
+"""Create, inspect, simulate, or play in a Living World save."""
 
 from __future__ import annotations
 
@@ -13,11 +13,13 @@ from tempfile import TemporaryDirectory
 from .market import SHOCKS
 from .model import Config, Transfer, WorldError
 from .persistence import Save
+from .player import play
 from .report import parse_seeds, viability_report
+from .web import serve
 
 SCENARIOS = (
     "lab", "village", "market", "routes", "firewood", "charcoal", "mining", "smelting",
-    "blacksmith", "tools", "seed-saving", "seed-trade", "hamlet",
+    "blacksmith", "tools", "seed-saving", "seed-trade", "hamlet", "civilian", "contracts", "apprenticeship",
 )
 
 
@@ -35,6 +37,15 @@ def parser() -> argparse.ArgumentParser:
     create.add_argument("--seed", type=int, required=True)
     create.add_argument("--scenario", choices=SCENARIOS, default="lab")
     create.add_argument("--config", type=Path, help="JSON overrides for world configuration")
+    create.add_argument("--player", help="name a playable character in a new hamlet or career scenario")
+
+    playable = commands.add_parser("play", help="open a hamlet save in the text interface")
+    playable.add_argument("--save", type=Path, required=True)
+
+    browser = commands.add_parser("web", help="play a local save in the browser")
+    browser.add_argument("--save", type=Path, required=True)
+    browser.add_argument("--port", type=int, default=8765, help="local port to listen on")
+    browser.add_argument("--open", action="store_true", help="open the address in your default browser")
 
     simulate = commands.add_parser("simulate", help="advance an existing world")
     simulate.add_argument("--save", type=Path, required=True)
@@ -85,7 +96,7 @@ def get_config(path: Path | None) -> Config:
 def dispatch(args: argparse.Namespace) -> dict[str, object]:
     if args.command == "create":
         return Save.create(args.save, args.seed, get_config(args.config),
-                           scenario=args.scenario).summary()
+                           scenario=args.scenario, player_name=args.player).summary()
     if args.command == "report":
         return viability_report(args.name, args.seeds, args.days, get_config(args.config), args.shock)
     if args.command == "scenario":
@@ -126,6 +137,12 @@ def dispatch(args: argparse.Namespace) -> dict[str, object]:
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     try:
+        if args.command == "play":
+            play(Save(args.save))
+            return 0
+        if args.command == "web":
+            serve(Save(args.save), args.port, open_browser=args.open)
+            return 0
         result = dispatch(args)
     except (ValueError, OSError, sqlite3.Error) as error:
         print(f"living-world: {error}", file=sys.stderr)

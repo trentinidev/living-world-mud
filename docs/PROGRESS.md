@@ -1,5 +1,82 @@
 # Progress
 
+## Nineteenth checkpoint — local browser play
+
+The `web` command serves a local game from an existing player save. The browser shows the character's location, needs, inventory, routes, and offers. Buttons and typed commands use the terminal's player adapter. Opening and refreshing the page read the saved state. Successful actions commit immediately.
+
+All 112 tests passed. The browser API and terminal produced the same digest and journal after a harvest shift, travel, a grain purchase and a meal. Tests also rejected a foreign host, a foreign browser origin and an unavailable purchase without changing the save. A Windows Edge run clicked through the same route, finished with four coins, and restored day one, minute 135, upon reload. The layout also fit a 375-pixel viewport.
+
+## Eighteenth checkpoint — Phase 2 economy acceptance
+
+Two `apprenticeship` saves with seed 8 started with the same digest, configuration, inventories, and character. Iara stayed idle in one save. In the other she accepted the west farm's order, took six paid field shifts, bought iron and firewood, rented the forge, delivered a 48-quality hoe, bought grain, and ate it. When the market had no grain on delivery, she waited nine simulated minutes for a new shipment. Both saves advanced to minute 10080 and passed the journal audit.
+
+| At day seven | Iara idle | Iara working and trading |
+| --- | ---: | ---: |
+| West farm's contract supplier | Ada | Iara |
+| Minute the supplier received 19 coins | 1229 | 2492 |
+| Harvests assisted by the delivered hoe | 8 | 8 |
+| Iara's wallet | 3 | 18 |
+| Village harvests | 353 | 357 |
+| Edible grain harvested | 1,115 | 1,135 |
+| Grain eaten | 620 | 621 |
+| Village coin supply | 225 | 225 |
+
+Iara received 12 coins in wages and 19 for the order. She spent 12 on iron, two on firewood, one on forge rent and one on grain. Both ordered tools can be traced from the maker to the farm's market stall and through installation, use and retirement. The figures describe this playthrough of seed 8.
+
+### Phase 2 core checks
+
+| Acceptance check | Verified evidence |
+| --- | --- |
+| Shared crafting and meaningful learning | Player and NPC forge shifts use the same inputs, time and experience award. The paid hammer lesson persists its recipe and later practice uses it. |
+| Skill changes the quality distribution | Fixed samples of 400 rolls per rank had means of 49.26 and 69.83 and overlapping quality ranges. |
+| Access, equipment, time, and interruption | Tests cover an absent anvil or fuel, an occupied forge, cancellation and reload during a pending action. |
+| Funded contracts with a competitor and a deadline | Tests cover funding, competing acceptances, item reservation and payment on delivery, and full refund on expiry. |
+| Civilian earnings and purchases | The PowerShell run spent wages on supplies and forge rent, received the order payment, and bought and ate grain. |
+| Measured player impact | Matched saves route the same west farm payment to different suppliers. Both delivered hoes enter actual field production. |
+| Authoritative text interface | Commands submit shared intents and both saves reconcile complete journals against final state. |
+
+All 110 tests passed. Reproduce the matched comparison from PowerShell with `.\.venv\Scripts\python.exe -m unittest discover -s tests -p test_contracts.py -k test_matched_career_run -v`. The next slice adds the local browser view.
+
+## Seventeenth checkpoint — the hammer lesson and a second forge recipe
+
+The `apprenticeship` scenario lets a civilian pay Ada two coins for a 60-minute lesson. While it is pending, the student retains a hold on the tuition and Ada and the forge are occupied. Completion pays Ada and unlocks the hammer recipe. Cancellation releases the funds and the two participants.
+
+In the installed PowerShell game with seed 8, Iara learned the recipe and forged a 64-quality hammer. Her next forge shift used it to add six quality points to a hoe and reduced its remaining uses from six to five. The save kept 225 coins. A separate check reopened the game after the lesson and confirmed the recipe was available. Three seven-day runs without a player reconciled the journal and each fulfilled the farm's hoe order.
+
+All 109 tests passed, including cancellation, resuming a lesson from a save, and retiring a hammer on its last use.
+
+## Sixteenth checkpoint — funded hoe orders
+
+The `contracts` scenario lets farms commission hoes when Ada's stall is out of stock. A posting holds 19 coins for one hoe of quality 40 or higher with a two-day deadline. The first supplier to secure the offer can deliver. The order pays from escrow and leaves the hoe at the farm's pickup stall. If the deadline passes, the money returns to the farm.
+
+In the installed PowerShell game with seed 8, Iara made a 48-quality hoe and delivered it at minute 2492 before the deadline at minute 3703. She received 19 coins and escrow returned to zero. In another run, a 32-quality hoe was refused. The issuing west farm received all 19 coins back when the deadline passed. The same seed without player activity awarded the west farm's order to Ada.
+
+The seven-day reports for seeds 0, 8 and 9 each recorded one NPC order, one delivery and one collection. Each journal reconciled goods, coins and open orders. Focused tests cover a pending delivery across save and load, two competing acceptances, missing payment funds and sale of an ordinary hoe while a qualified item is reserved for an order.
+
+All 106 tests passed. The seven-day headless hamlet with seed 8 retained its original digest.
+
+## Fifteenth checkpoint — forge work, quality, and independent sales
+
+The `civilian` scenario adds paid workshop shifts, blacksmithing experience and rentable access to Ada's forge. Every hoe takes 140 minutes, one iron bar, one firewood bundle and access to an anvil. When the work completes, the same recipe grants one experience point to a player or an NPC. A canceled shift releases reserves and grants no wages or experience.
+
+The seed-8 PowerShell run started a civilian with three coins. Six field shifts brought the balance to 15. The civilian paid 12 for iron, two for firewood and one for forge rent. Ada then paid 16 for the resulting hoe. Its maker and quality record moved to Ada's stall. The whole save still held 225 coins. A separate run verified paid forge work and experience after reopening a save.
+
+Each of the 400 fixed seeds was sampled at novice and expert rank with equal starting fatigue. The novice mean was 49.26 and the expert mean was 69.83. The standard deviations were 10.54 and 4.82 respectively, with overlap between the ranges. Seven-day zero-player runs for seeds 0, 8 and 9 reconciled the ledger and consumed six, eight and eight bundles of fuel at their forges.
+
+All 101 tests passed. The original seven-day `hamlet` run with seed 8 kept the same digest.
+
+The next slice adds NPC orders with reserved payment, deadlines, and competing suppliers.
+
+## Fourteenth checkpoint — playable civilian in the hamlet
+
+A new `hamlet` save can include one playable character. The `play` command opens a local text prompt for inspecting roads, traveling, viewing prices, buying grain, eating, resting, waiting, and taking paid field shifts. The same simulator handles these actions for a human or an NPC.
+
+The installed Windows executable played a seed-8 save from creation through a field shift, 20 minutes of travel, a one-coin purchase, and a meal. The character started with three coins, earned two, and finished with four. Reopening the save restored the location and inventory.
+
+All 96 tests passed. A paired one-day test confirmed that an idle player leaves NPC decisions and balances unchanged. Rejected travel and purchases leave the saved clock and journal unchanged. The headless seed-8 seven-day hamlet retained its digest.
+
+The next slice opens paid forge work to the civilian and records skill gains for both players and NPCs.
+
 ## Thirteenth checkpoint — hamlet employment, additional farms, and disruption tests
 
 The `hamlet` now gives farmhands access to paid forge shifts. The blacksmith moves purchased iron into the forge before a shift can reserve it. A hired shift also reserves the wage. The worker earns it when the hoe is finished. Craft workers can take field shifts when their usual work is unavailable and they need income. The default village still has 31 residents and eight locations. Increasing `hamlet.farms` to four produced a village with 33 residents and ten locations. All four farms harvested and sold grain in the seven-day run.

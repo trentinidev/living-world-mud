@@ -86,4 +86,30 @@ Craft workers can fall back to funded farm shifts when their usual work stalls a
 
 The zero-player report runs each seed with an independent SQLite save. It records cumulative activity and per-good stock at the requested horizons. At the final horizon it also replays the committed journal to verify that stock balances match the save and that every coin movement has a source and destination.
 
+## Local player commands
+
+A new hamlet may include one manually controlled actor. Its name and inventory persist in the world snapshot, and the creation journal includes its initial balances. Starting funds use the same configured amount as a farmhand. The NPC scheduler skips this actor and draws the same initial wake times for the NPCs.
+
+The text interface reads a save through `Save.read`. A timed player command translates to an existing intent and runs through `Save.mutate`. It records the command, reserves the inputs, and advances to the action's completion while the NPC queue keeps running. This commits physical movement, payments, consumption, and needs together with the journal. A rejected command rolls back its attempted changes. Older headless saves have no player field in their snapshots.
+
+The local browser serves bundled assets from a standard-library HTTP server on loopback. It reads a character and local offers through `Save.read`. A button or typed command calls the same player command adapter as the terminal and returns the committed view. Command requests check the server host and browser origin, and the page renders names and game messages as text.
+
+## Civilian blacksmithing
+
+The `civilian` scenario builds on the hamlet. Its forge has an anvil and one shared work slot. Both hired and independent shifts take 140 minutes and consume one iron bar and one firewood bundle. A hired shift uses Ada's stock and reserves the worker's wage. An independent shift uses the worker's stock, pays Ada rent and puts the tool in the worker's inventory.
+
+Completed work awards one point of blacksmithing experience. Quality depends on rank, fatigue and a bounded roll seeded from the world and the action's start event. Each hoe records its maker, quality, remaining uses and the accounts that supplied the iron and fuel. The tool record follows its inventory movements. Ada pays for offered hoes from her wallet and sells them from the same stall that supplies the farms.
+
+## Funded hoe orders
+
+The `contracts` scenario adds a market board to the civilian economy. A farm visiting the square can post an order when it needs a hoe and the blacksmith's unreserved stock is empty. Posting debits 19 coins to the farm's escrow. A farm can have one active order. The same acceptance and delivery actions are available to a player and to Ada.
+
+Delivery reserves a specific item with quality 40 or higher and moves it into the farm's market pickup stock. The coin in escrow moves to the supplier in the same transaction. Ordinary purchases respect item reservations while the farm may collect its delivery on a later market visit. A scheduled event at the exclusive deadline, two simulated days after posting, refunds an open or accepted order. Closed orders remain in the save, and the audit checks escrow against the count of active orders.
+
+## Apprenticeship and workshop tools
+
+The `apprenticeship` scenario adds a 60-minute lesson at Ada's forge for two coins. Both participants and the shared forge slot remain occupied while the lesson is pending. Payment and the learned recipe commit together. A failed or canceled lesson frees the slot and the money.
+
+A trained renter can forge a hammer from one iron bar and one firewood bundle over 160 minutes. The hammer has a maker, quality, material accounts and six uses. When the smith completes a piece while carrying a hammer, it adds one quality point per ten points of the hammer's quality, up to six. The hammer spends a use on completion and leaves stock on its last use. The journal and the saved item records account for hoes and hammers.
+
 See [ADR 0001](adr/0001-transactional-snapshot.md) for persistence, [ADR 0002](adr/0002-standing-grain-offers.md) for pricing, [ADR 0003](adr/0003-village-travel.md) for travel, [ADR 0004](adr/0004-firewood-and-hearths.md) for hearths, [ADR 0005](adr/0005-charcoal-batches.md) for charcoal, [ADR 0006](adr/0006-ore-extraction-and-delivery.md) for ore, [ADR 0007](adr/0007-smelting.md) for smelting, [ADR 0008](adr/0008-forging.md) for forging, [ADR 0009](adr/0009-farm-tool-wear.md) for farm tools, [ADR 0010](adr/0010-seed-saving.md) for seed saving, and [Progress](PROGRESS.md) for observed results.

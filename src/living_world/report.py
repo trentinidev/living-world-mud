@@ -41,7 +41,7 @@ def snapshot(save: Save, settings_cap: int) -> dict[str, object]:
         market=village["market"],
     )
     for section in ("forestry", "charcoal", "mining", "smelting", "blacksmith", "tools", "seed_saving",
-                    "seed_trade", "employment"):
+                    "seed_trade", "employment", "craftsmanship", "orders", "apprenticeship"):
         if section in village:
             result[section] = village[section]
     if "seed_saving" in village:

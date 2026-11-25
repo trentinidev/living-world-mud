@@ -7,12 +7,14 @@ from dataclasses import dataclass
 from random import Random
 from typing import Literal
 
-from . import blacksmith, farm_tools, forestry, kiln, mining, routes, seed_trade, smelting, village
+from . import blacksmith, contracts, farm_tools, forestry, kiln, mining, routes, seed_trade, smelting, village
 from .model import (
-    BLACKSMITH_CONTENT_VERSIONS, COIN, FARM_OWNER, FARMSTEAD, FIREWOOD, FORESTRY_CONTENT_VERSIONS, GRAIN,
-    HAMLET_CONTENT_VERSION, HAMLET_CONTENT_VERSIONS, MARKET_CONTENT_VERSION, MARKET_CONTENT_VERSIONS,
+    BLACKSMITH_CONTENT_VERSIONS, COIN, CONTRACTS_CONTENT_VERSIONS, FARM_OWNER, FARMSTEAD, FIREWOOD,
+    FORESTRY_CONTENT_VERSIONS, GRAIN,
+    HAMLET_CONTENT_VERSIONS, MARKET_CONTENT_VERSION, MARKET_CONTENT_VERSIONS,
     SEED_GRAIN, SEED_TRADE_CONTENT_VERSIONS, SMELTING_CONTENT_VERSIONS, STANDING_WOOD,
-    SPATIAL_CONTENT_VERSIONS, TOOLS_CONTENT_VERSIONS, Actor, Config, ForgeIntent, Intent, MarketIntent,
+    SPATIAL_CONTENT_VERSIONS, TOOLS_CONTENT_VERSIONS, WORKSHOP_CONTENT_VERSIONS,
+    Actor, Config, ForgeIntent, Intent, MarketIntent,
     VillageIntent, World, WorldError,
 )
 from .routes import FARMS, WEST_FARM
@@ -186,7 +188,10 @@ def route_choices(
         return
     if world.content_version in SEED_TRADE_CONTENT_VERSIONS and home:
         yield from seed_trade.procurement(world, actor_id, available)
-    if world.content_version in TOOLS_CONTENT_VERSIONS and home:
+    if world.content_version in CONTRACTS_CONTENT_VERSIONS and home:
+        yield from contracts.farm_choices(world, actor_id, available)
+    if (world.content_version in TOOLS_CONTENT_VERSIONS and home
+            and (world.content_version not in CONTRACTS_CONTENT_VERSIONS or not contracts.has_order(world, actor_id))):
         yield from farm_tools.procurement(world, actor_id, available, delivery_grain)
     if actor_id == routes.CHARCOAL_BURNER:
         yield from kiln.work(world, available)
@@ -195,6 +200,8 @@ def route_choices(
     elif actor_id == routes.SMELTER:
         yield from smelting.work(world, available)
     elif actor_id == routes.BLACKSMITH:
+        if world.content_version in CONTRACTS_CONTENT_VERSIONS:
+            yield from contracts.smith_choices(world, available)
         yield from blacksmith.work(world, available, hire_inbound=forge_hire_inbound)
     if actor_id == routes.WOODCUTTER and not woodcutter_out_of_work(world, available):
         yield from forestry.work(world, available)
@@ -209,7 +216,7 @@ def route_choices(
         elif pantry_stock < settings.pantry_target:
             yield farm_tools.harvest(world, actor_id, settings.harvest_minutes, actor_id, hoe_is_free)
     elif actor.can_work and coin < settings.meal_price * 4:
-        if (world.content_version == HAMLET_CONTENT_VERSION and actor_id.startswith("farmhand-")
+        if (world.content_version in WORKSHOP_CONTENT_VERSIONS and actor_id.startswith("farmhand-")
                 and forge_open and not forge_hire_inbound and blacksmith.can_hire(world, available)):
             if site == routes.FORGE:
                 yield ForgeIntent("forge_hoe", actor_id, blacksmith.FORGE_MINUTES)

@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Living World</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/game.js" defer></script>
+</head>
+<body>
+  <header class="masthead">
+    <div class="shell masthead-content">
+      <h1>Living World</h1>
+      <div class="session">
+        <span id="connection" role="status">Conectando…</span>
+        <button id="reload" class="quiet" type="button">Atualizar</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="shell">
+    <section class="location" aria-label="Sua localização">
+      <div>
+        <p class="character" id="character"></p>
+        <h2 id="location">Carregando o save…</h2>
+      </div>
+      <div class="time">
+        <strong id="day"></strong>
+        <span id="minute"></span>
+      </div>
+    </section>
+
+    <p id="feedback" class="feedback" hidden></p>
+
+    <section id="game" hidden>
+      <div class="scoreboard" aria-label="Seu estado">
+        <div class="score"><span>Moedas</span><strong id="coins">0</strong></div>
+        <div class="score"><span>Grãos</span><strong id="grain">0</strong></div>
+        <div class="score">
+          <label for="hunger">Fome <strong id="hunger-label"></strong></label>
+          <progress id="hunger" value="0"></progress>
+        </div>
+        <div class="score">
+          <label for="fatigue">Cansaço <strong id="fatigue-label"></strong></label>
+          <progress id="fatigue" value="0"></progress>
+        </div>
+      </div>
+      <div class="columns">
+        <div class="stack">
+          <section class="panel">
+            <h3>Caminhos</h3>
+            <div id="exits" class="roads"></div>
+          </section>
+          <section class="panel">
+            <h3>Ações</h3>
+            <div id="actions" class="actions"></div>
+          </section>
+          <section id="market-panel" class="panel" hidden>
+            <h3>Mercado</h3>
+            <pre id="market"></pre>
+            <div id="market-actions" class="actions"></div>
+          </section>
+          <section id="orders-panel" class="panel" hidden>
+            <h3>Encomendas</h3>
+            <div id="orders" class="stack compact"></div>
+          </section>
+        </div>
+        <aside class="stack" aria-label="Seu personagem">
+          <section class="panel">
+            <h3>Inventário</h3>
+            <pre id="inventory"></pre>
+          </section>
+          <section id="skills-panel" class="panel" hidden>
+            <h3>Ofício</h3>
+            <pre id="skills"></pre>
+          </section>
+        </aside>
+      </div>
+    </section>
+
+    <section class="panel journal">
+      <h3>Diário</h3>
+      <ol id="log" aria-live="polite" aria-label="Resultados das ações"></ol>
+      <form id="command-form">
+        <label for="command">Comando do jogo</label>
+        <div class="input-row">
+          <input id="command" type="text" placeholder="Ex.: wait 804" maxlength="256" autocomplete="off">
+          <button class="primary" type="submit">Enviar</button>
+          <button type="button" data-command="help">Ajuda</button>
+        </div>
+      </form>
+    </section>
+  </main>
+</body>
+</html>
